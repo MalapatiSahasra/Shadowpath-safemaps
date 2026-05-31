@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
-import { Navigation, Shield, Eye, AlertTriangle, Sun, Crosshair, Navigation2, Search, MapPin, Plus, Check, Siren, ShieldAlert, Moon, Clock, Volume2, Share2, Users, X, Store, Lightbulb } from 'lucide-react';
+import { Navigation, Shield, Eye, AlertTriangle, Sun, Crosshair, Search, MapPin, Plus, Check, Siren, Clock, Volume2, Share2, Users, X, Store, Lightbulb } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -12,7 +12,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Upgraded custom marker styles matching your legend signs perfectly
+// Custom glowing HTML markers matching the premium style guide perfectly
 const createCustomMarker = (type) => {
   let iconHtml = '';
   
@@ -31,7 +31,8 @@ const createCustomMarker = (type) => {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
           <polyline points="9 22 9 12 15 12 15 22"></polyline>
-        </svg></div>`;
+        </svg>
+      </div>`;
   } else if (type === 'hazard') {
     iconHtml = `
       <div class="flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/20 border-2 border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)]">
@@ -77,11 +78,16 @@ function MapClickHandler({ onMapClick, isReporting }) {
 }
 
 export default function App() {
+  // 🌐 CONNECTED ENDPOINT Anchor linked directly to your live cloud server backend:
+  const API_URL = "https://shadowpath-server-backend.onrender.com/api/route";
+
+  // Coordinates & Location States
   const [mapCenter, setMapCenter] = useState([14.6740, 77.5930]); 
   const [mapZoom, setMapZoom] = useState(15.5); 
   const [startLoc, setStartLoc] = useState('Maruthi Nagar, Anantapur (Live)');
   const [basePoint, setBasePoint] = useState([14.6690, 77.5910]); 
 
+  // UI Component Flags
   const [searchQuery, setSearchQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [isLiveTracking, setIsLiveTracking] = useState(false);
@@ -94,6 +100,7 @@ export default function App() {
   const [isCompanionViewOpen, setIsCompanionViewOpen] = useState(false);
   const [showLinkCopiedNotification, setShowLinkCopiedNotification] = useState(false);
 
+  // Time Engine Matrix 
   const getSystemMinutesFromNoon = () => {
     const now = new Date();
     const hour = now.getHours();
@@ -113,7 +120,6 @@ export default function App() {
     trafficRotate: 'rotate-45'
   });
 
-  // Locked down explicit regional coordinates to ensure layout pins render flawlessly relative to your screenshot route path
   const [selectedDestination, setSelectedDestination] = useState({
     name: 'Clock Tower, Anantapur - Krishnagiri Road',
     coords: [14.6792, 77.5954],
@@ -122,10 +128,10 @@ export default function App() {
     traffic: 'High',
     trafficRotate: 'rotate-45',
     features: [
-      { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 80, desc: '💡 Working LED Streetlight: Fully Illuminated Safe Segment' },
-      { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business Area: High Commercial Foot Traffic / Shops Open' },
-      { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 80, desc: '💡 Working LED Streetlight: Active Safety Grid Corridor' },
-      { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Danger Risk Zone: Non-Working Infrastructure Lights reported' }
+      { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 90, desc: '💡 Functional Streetlight Area: Fully Operational working road' },
+      { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business District: Commercial Area (High Security)' },
+      { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 90, desc: '💡 Functional Streetlight Area: Clear Illumination Grid' },
+      { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Non-Working Road Area: Broken Infrastructure Lights / Low Visibility' }
     ]
   });
 
@@ -143,10 +149,10 @@ export default function App() {
       traffic: 'High',
       trafficRotate: 'rotate-45',
       features: [
-        { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 80, desc: '💡 Working LED Streetlight: Fully Illuminated Safe Segment' },
-        { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business Area: High Commercial Foot Traffic / Shops Open' },
-        { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 80, desc: '💡 Working LED Streetlight: Active Safety Grid Corridor' },
-        { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Danger Risk Zone: Non-Working Infrastructure Lights reported' }
+        { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 90, desc: '💡 Functional Streetlight Area: Fully Operational working road' },
+        { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business District: Commercial Area (High Security)' },
+        { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 90, desc: '💡 Functional Streetlight Area: Clear Illumination Grid' },
+        { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Non-Working Road Area: Broken Infrastructure Lights / Low Visibility' }
       ]
     },
     { 
@@ -281,7 +287,7 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0a0e17] text-slate-200 select-none flex">
       
-      {/* MAP ENGINE CANVAS BACKDROP */}
+      {/* MAP ENGINE LAYER */}
       <div className="absolute inset-0 w-full h-full z-0">
         <MapContainer center={mapCenter} zoom={mapZoom} zoomControl={false} className="w-full h-full">
           <TileLayer 
@@ -292,7 +298,7 @@ export default function App() {
           <MapViewHandler center={isSOSActive ? [14.6735, 77.5925] : mapCenter} zoom={isSOSActive ? 16 : mapZoom} />
           <MapClickHandler onMapClick={handleMapClickToReport} isReporting={isReportingMode} />
 
-          {/* 💡 Ambient Radiation Glow Halos */}
+          {/* Radiation Glow Halos */}
           {!isSOSActive && selectedDestination.features.map((feat) => {
             let colorOption = '#f59e0b'; 
             if (feat.type === 'store') colorOption = '#10b981'; 
@@ -314,7 +320,7 @@ export default function App() {
             );
           })}
 
-          {/* Render User report flags */}
+          {/* Custom Hazards Circles */}
           {customHazards.map((hazard) => (
             <Circle 
               key={`custom-glow-${hazard.id}`}
@@ -326,8 +332,7 @@ export default function App() {
 
           {!isSOSActive && (
             <>
-              {/* Working/Non-Working Road Polylines */}
-              <Polyline positions={safestPathCoordinates} pathOptions={{ color: isNightTime ? '#14b8a6' : '#a855f7', weight: 6, opacity: 0.95, lineCap: 'round' }} />
+              <Polyline positions={safestPathCoordinates} pathOptions={{ color: isNightTime ? '#14b8a6' : '#a855f7', weight: 5, opacity: 0.95, lineCap: 'round' }} />
               <Polyline positions={shortestUnlitCoordinates} pathOptions={{ color: '#475569', weight: 3, opacity: 0.5, dashArray: '8, 12' }} />
               <Marker position={targetPoint} icon={createCustomMarker('user')} />
             </>
@@ -336,7 +341,7 @@ export default function App() {
           {isSOSActive && <Polyline positions={[basePoint, [14.6752, 77.5912]]} pathOptions={{ color: '#3b82f6', weight: 5, opacity: 0.95, lineCap: 'round' }} />}
           <Marker position={basePoint} icon={createCustomMarker('live')} />
           
-          {/* 🌟 FIX: Stripped the night guard filter loop entirely to make icons stay visible at 1:35 PM */}
+          {/* Infrastructure Map Signs Layer */}
           {activeMapMarkers.map((feat) => (
             <Marker key={feat.id} position={feat.pos} icon={createCustomMarker(feat.type)}>
               <Popup className="dark-popup"><span className="font-semibold text-slate-900 text-xs block">{feat.desc}</span></Popup>
@@ -363,7 +368,7 @@ export default function App() {
         )}
       </div>
 
-      {/* HUD SIDEBAR HUD CARD */}
+      {/* FLOATING PRIMARY PEDESTRIAN HUD CONTROL BOARD */}
       <div className="absolute top-6 left-6 z-[1000] w-[390px] flex flex-col gap-4 max-h-[calc(100vh-48px)] overflow-y-auto pr-1">
         
         {/* Brand Header */}
@@ -385,7 +390,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Time Slider */}
+        {/* Time Slider Card */}
         <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-3">
           <div className="flex justify-between items-center text-xs font-bold text-white px-0.5">
             <span className="text-slate-400 text-[10px] uppercase tracking-wider flex items-center gap-1"><Clock size={11} /> Temporal Sync</span>
@@ -420,7 +425,7 @@ export default function App() {
           </>
         )}
 
-        {/* HUD Infrastructure Legend Card */}
+        {/* HUD Legend Card */}
         <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-2">
           <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Infrastructure Map Signs</span>
           <div className="grid grid-cols-1 gap-2 mt-1 text-xs font-semibold text-slate-300">
@@ -441,14 +446,14 @@ export default function App() {
           <div className="flex flex-col gap-3"><div className="flex items-center justify-between p-3 bg-slate-900/30 border border-white/5 rounded-xl"><span className="text-xs font-medium text-slate-300/90 flex items-center gap-2"><AlertTriangle size={14} className="text-amber-500" /> Avoided Dark Zones</span><span className="font-extrabold text-xs text-amber-400 bg-amber-500/15 px-2.5 py-0.5 rounded-md border border-amber-500/20">{dynamicMetrics.darkZonesCount}</span></div></div>
         </div>
 
-        {/* Live Tracking Mode Toggle Button */}
+        {/* Tracking Assist Toggle */}
         <div className="flex items-center justify-between p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl">
           <span className="text-[10px] font-extrabold tracking-widest uppercase flex items-center gap-2 text-slate-300"><span className={`w-2 h-2 rounded-full ${isLiveTracking ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`}></span>Live Tracking Assist Mode</span>
           <button onClick={() => setIsLiveTracking(!isLiveTracking)} className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer bg-slate-800"><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-out ${isLiveTracking ? 'translate-x-6 bg-cyan-400 flex items-center justify-center text-[8px]' : 'translate-x-1'}`}>{isLiveTracking && <Volume2 size={10} className="text-slate-950" />}</span></button>
         </div>
       </div>
 
-      {/* Companion View Overlay Window */}
+      {/* Companion Link Guardian Panel Overlay */}
       {isCompanionViewOpen && (
         <div className="absolute top-6 right-6 z-[4000] w-[350px] bg-slate-950/85 border border-blue-500/30 rounded-3xl backdrop-blur-2xl shadow-2xl flex flex-col p-5 gap-4">
           <div className="flex items-center justify-between border-b border-white/5 pb-3">

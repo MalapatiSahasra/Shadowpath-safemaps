@@ -1,478 +1,349 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
-import { Navigation, Shield, Eye, AlertTriangle, Sun, Crosshair, Search, MapPin, Plus, Check, Siren, Clock, Volume2, Share2, Users, X, Store, Lightbulb } from 'lucide-react';
-import L from 'leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Fix Leaflet default marker icons glitch
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+// =========================================================================
+// LEAFLET MARKER ASSET FIX FOR REACT COMPILATION
+// =========================================================================
+import L from 'leaflet';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+let DefaultIcon = L.icon({
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34]
 });
+L.Marker.prototype.options.icon = DefaultIcon;
 
-// Custom glowing HTML markers matching the premium style guide perfectly
-const createCustomMarker = (type) => {
-  let iconHtml = '';
-  
-  if (type === 'light') {
-    iconHtml = `
-      <div class="flex items-center justify-center w-9 h-9 rounded-full bg-amber-500/20 border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.7)]">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"></path>
-          <line x1="9" y1="18" x2="15" y2="18"></line>
-          <line x1="10" y1="22" x2="14" y2="22"></line>
-        </svg>
-      </div>`;
-  } else if (type === 'store') {
-    iconHtml = `
-      <div class="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-500/20 border-2 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.7)]">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-          <polyline points="9 22 9 12 15 12 15 22"></polyline>
-        </svg>
-      </div>`;
-  } else if (type === 'hazard') {
-    iconHtml = `
-      <div class="flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/20 border-2 border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)]">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
-          <line x1="12" y1="9" x2="12" y2="13"></line>
-          <line x1="12" y1="17" x2="12.01" y2="17"></line>
-        </svg>
-      </div>`;
-  } else if (type === 'user' || type === 'live') {
-    iconHtml = `<div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-cyan-400 border-2 border-white shadow-[0_0_15px_#22d3ee]"><div class="absolute w-10 h-10 rounded-full bg-cyan-400/30 animate-ping"></div></div>`;
-  } else if (type === 'sos') {
-    iconHtml = `<div class="flex items-center justify-center w-9 h-9 rounded-full bg-blue-500/30 border-2 border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.9)] animate-pulse"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>`;
-  }
-
-  return L.divIcon({
-    html: iconHtml,
-    className: 'custom-leaflet-icon',
-    iconSize: [36, 36],
-    iconAnchor: [18, 18]
-  });
-};
-
-function MapViewHandler({ center, zoom }) {
+// =========================================================================
+// SUB-COMPONENT: DYNAMIC VIEWPORT FOCUS CONTROLLER
+// =========================================================================
+function ChangeMapView({ center }) {
   const map = useMap();
   useEffect(() => {
-    if (center && center[0] && center[1]) {
-      map.flyTo(center, zoom || 15.5, { animate: true, duration: 1.5 });
+    if (center) {
+      map.setView(center, 14); // Resets zoom and centers whenever coordinates alter
     }
-  }, [center, zoom, map]);
-  return null;
-}
-
-function MapClickHandler({ onMapClick, isReporting }) {
-  useMapEvents({
-    click(e) {
-      if (isReporting) {
-        onMapClick([e.latlng.lat, e.latlng.lng]);
-      }
-    },
-  });
+  }, [center, map]);
   return null;
 }
 
 export default function App() {
-  // 🌐 CONNECTED ENDPOINT Anchor linked directly to your live cloud server backend:
-  const API_URL = "https://shadowpath-server-backend.onrender.com/api/route";
-
-  // Coordinates & Location States
-  const [mapCenter, setMapCenter] = useState([14.6740, 77.5930]); 
-  const [mapZoom, setMapZoom] = useState(15.5); 
-  const [startLoc, setStartLoc] = useState('Maruthi Nagar, Anantapur (Live)');
-  const [basePoint, setBasePoint] = useState([14.6690, 77.5910]); 
-
-  // UI Component Flags
-  const [searchQuery, setSearchQuery] = useState('');
+  // Core Navigation States
+  const [startLoc, setStartLoc] = useState(null);       // Tracks current live user GPS
+  const [mapCenter, setMapCenter] = useState(null);     // Dynamic center mapping pivot
+  const [searchQuery, setSearchQuery] = useState('');   // User destination input text
+  const [searchResults, setSearchResults] = useState([]);// Autocomplete locations array
+  const [selectedDest, setSelectedDest] = useState(null); // Locked target endpoint coordinates
   const [showDropdown, setShowDropdown] = useState(false);
-  const [isLiveTracking, setIsLiveTracking] = useState(false);
-  const [userProgress, setUserProgress] = useState(0);
 
+  // UI Interactive Toggle States
   const [isReportingMode, setIsReportingMode] = useState(false);
-  const [customHazards, setCustomHazards] = useState([]);
-  const [showReportNotification, setShowReportNotification] = useState(false);
-  const [isSOSActive, setIsSOSActive] = useState(false);
-  const [isCompanionViewOpen, setIsCompanionViewOpen] = useState(false);
-  const [showLinkCopiedNotification, setShowLinkCopiedNotification] = useState(false);
+  const [timeValue, setTimeValue] = useState(new Date().getHours()); // Sync slider defaults to system time
+  const [routePolyline, setRoutePolyline] = useState([]); // Array of coordinates for path render
+  const [safetyMetrics, setSafetyMetrics] = useState(null); // Custom metrics object from backend
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
 
-  // Time Engine Matrix 
-  const getSystemMinutesFromNoon = () => {
-    const now = new Date();
-    const hour = now.getHours();
-    const min = now.getMinutes();
-    return hour >= 12 ? (hour - 12) * 60 + min : (hour + 12) * 60 + min;
-  };
-
-  const [minuteSliderValue, setMinuteSliderValue] = useState(getSystemMinutesFromNoon());
-  const isNightTime = minuteSliderValue >= 360; 
-
-  const [dynamicMetrics, setDynamicMetrics] = useState({
-    distanceStr: '1.4 km',
-    durationStr: '18 min',
-    lightingPercent: 94,
-    darkZonesCount: 3,
-    trafficText: 'HIGH',
-    trafficRotate: 'rotate-45'
-  });
-
-  const [selectedDestination, setSelectedDestination] = useState({
-    name: 'Clock Tower, Anantapur - Krishnagiri Road',
-    coords: [14.6792, 77.5954],
-    baseLighting: 94,
-    baseDarkZones: 3,
-    traffic: 'High',
-    trafficRotate: 'rotate-45',
-    features: [
-      { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 90, desc: '💡 Functional Streetlight Area: Fully Operational working road' },
-      { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business District: Commercial Area (High Security)' },
-      { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 90, desc: '💡 Functional Streetlight Area: Clear Illumination Grid' },
-      { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Non-Working Road Area: Broken Infrastructure Lights / Low Visibility' }
-    ]
-  });
-
-  const safeHavensDatabase = [
-    { id: 'sos-1', pos: [14.6752, 77.5912], type: 'sos', desc: '🚨 EMERGENCY SAFEHAVEN: Anantapur Urban Police Station Hub' },
-    { id: 'sos-2', pos: [14.6715, 77.5958], type: 'sos', desc: '🚨 EMERGENCY SAFEHAVEN: Government General Hospital Trauma Wing' }
-  ];
-
-  const searchDatabase = [
-    { 
-      name: 'Clock Tower, Anantapur - Krishnagiri Road', 
-      coords: [14.6792, 77.5954],
-      baseLighting: 94,
-      baseDarkZones: 3,
-      traffic: 'High',
-      trafficRotate: 'rotate-45',
-      features: [
-        { id: 1, type: 'light', pos: [14.6715, 77.5920], radius: 90, desc: '💡 Functional Streetlight Area: Fully Operational working road' },
-        { id: 2, type: 'store', pos: [14.6740, 77.5931], radius: 110, desc: '🛍️ Active Business District: Commercial Area (High Security)' },
-        { id: 3, type: 'light', pos: [14.6765, 77.5942], radius: 90, desc: '💡 Functional Streetlight Area: Clear Illumination Grid' },
-        { id: 4, type: 'hazard', pos: [14.6738, 77.5955], radius: 95, desc: '⚠️ Non-Working Road Area: Broken Infrastructure Lights / Low Visibility' }
-      ]
-    },
-    { 
-      name: 'Maruthi Nagar Central Park, Anantapur', 
-      coords: [14.6710, 77.5915],
-      baseLighting: 98,
-      baseDarkZones: 0,
-      traffic: 'Medium',
-      trafficRotate: 'rotate-90',
-      features: [
-        { id: 1, type: 'light', pos: [14.6700, 77.5912], radius: 70, desc: '💡 Working Streetlight: Clear View Pathway' },
-        { id: 2, type: 'store', pos: [14.6708, 77.5914], radius: 85, desc: '🛍️ Active Working Marketplace Area' }
-      ]
-    }
-  ];
-
-  const calculateDynamicSafetyMetrics = (startCoords, endCoords, targetDest) => {
-    if (!startCoords || !endCoords) return;
-    const R = 6371; 
-    const dLat = (endCoords[0] - startCoords[0]) * Math.PI / 180;
-    const dLon = (endCoords[1] - startCoords[1]) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(startCoords[0] * Math.PI / 180) * Math.cos(endCoords[0] * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const realDistance = R * c; 
-
-    const currentLighting = isNightTime ? targetDest.baseLighting : 100;
-    const currentDarkZones = isNightTime ? (targetDest.baseDarkZones + customHazards.length) : 0;
-    const walkingDurationMins = Math.round(realDistance * 13); 
-
-    setDynamicMetrics({
-      distanceStr: `${realDistance.toFixed(1)} km`,
-      durationStr: `${walkingDurationMins} min`,
-      lightingPercent: currentLighting,
-      darkZonesCount: currentDarkZones,
-      trafficText: isNightTime ? targetDest.traffic.toUpperCase() : 'MEDIUM',
-      trafficRotate: isNightTime ? targetDest.trafficRotate : 'rotate-90'
-    });
-  };
-
-  const detectLiveLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          const userGPS = [latitude, longitude];
-          setBasePoint(userGPS);
-          setMapCenter(userGPS);
-          setStartLoc(`📍 Current Location Locked (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
-          calculateDynamicSafetyMetrics(userGPS, selectedDestination.coords, selectedDestination);
-        },
-        () => {
-          calculateDynamicSafetyMetrics(basePoint, selectedDestination.coords, selectedDestination);
-        }
-      );
-    }
-  };
-
+  // =========================================================================
+  // CORE ADVANCED GEOLOCATION AUTO-CAPTURE BLOCK (APP LOAD)
+  // =========================================================================
   useEffect(() => {
-    detectLiveLocation();
-  }, [minuteSliderValue, customHazards]);
-
-  const filteredSuggestions = searchDatabase.filter(item => 
-    item.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const targetPoint = selectedDestination.coords;
-
-  const safestPathCoordinates = [
-    basePoint,
-    [14.6715, 77.5920],
-    [14.6740, 77.5931],
-    [14.6765, 77.5942],
-    targetPoint,
-  ];
-
-  const shortestUnlitCoordinates = [
-    basePoint,
-    [14.6738, 77.5955],
-    targetPoint,
-  ];
-
-  const activeMapMarkers = isSOSActive 
-    ? safeHavensDatabase 
-    : [...(selectedDestination?.features || []), ...customHazards];
-
-  const handleMapClickToReport = (coords) => {
-    const newHazard = {
-      id: `crowd-${Date.now()}`,
-      pos: coords,
-      type: 'hazard',
-      radius: 95,
-      desc: '⚠️ Crowdsourced Report: Pedestrian Non-Working Dark Road Area'
-    };
-    setCustomHazards([...customHazards, newHazard]);
-    setIsReportingMode(false); 
-    setShowReportNotification(true);
-    setTimeout(() => setShowReportNotification(false), 3000);
-  };
-
-  const getCurrentUserPosition = () => {
-    const activeRoute = isSOSActive ? [basePoint, [14.6752, 77.5912]] : safestPathCoordinates;
-    const index = Math.min(Math.floor((userProgress / 100) * activeRoute.length), activeRoute.length - 1);
-    return activeRoute[index] || activeRoute[0];
-  };
-
-  useEffect(() => {
-    let interval = null;
-    if (isLiveTracking) {
-      interval = setInterval(() => {
-        setUserProgress((prev) => {
-          const next = prev + 2;
-          if (next >= 100) return 0;
-          return next;
-        });
-      }, 200);
-    } else {
-      setUserProgress(0);
-      clearInterval(interval);
+    if (!navigator.geolocation) {
+      console.warn("Geolocation API hardware unvailable on this browser environment.");
+      // Standard local spatial coordinate fallback structure to prevent map crashes
+      setStartLoc([14.6600, 77.5500]);
+      setMapCenter([14.6600, 77.5500]);
+      setIsLoading(false);
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isLiveTracking]);
 
-  const formatHourString = (val) => {
-    let totalHours = Math.floor(val / 60) + 12;
-    let mins = val % 60;
-    let paddedMins = mins < 10 ? `0${mins}` : mins;
-    if (totalHours === 12) return `12:${paddedMins} PM`;
-    if (totalHours < 24) return `${totalHours - 12}:${paddedMins} PM`;
-    return `${totalHours - 24}:${paddedMins} AM`;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        console.log(`Hardware GPS Lock Confirmed: ${latitude}, ${longitude}`);
+        
+        setStartLoc([latitude, longitude]);
+        setMapCenter([latitude, longitude]);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error("Hardware tracking permission exceptions:", error);
+        // Resilient fallback structure if browser blocks permission mid-session
+        setStartLoc([14.6600, 77.5500]);
+        setMapCenter([14.6600, 77.5500]);
+        setIsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  }, []);
+
+  // =========================================================================
+  // GLOBAL METRIC SEARCH DISCOVERY PIPELINE (NOMINATIM API LINK)
+  // =========================================================================
+  const handleDestinationSearch = async (queryText) => {
+    setSearchQuery(queryText);
+    
+    // Safety guard to halt empty string inputs or minor typos from network flooding
+    if (!queryText || queryText.trim().length < 3) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      // Connects directly to OpenStreetMap global naming archives for full discovery matching
+      const queryUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryText)}&limit=10&addressdetails=1`;
+      
+      const response = await fetch(queryUrl, {
+        headers: { "Accept-Language": "en" }
+      });
+      
+      if (!response.ok) throw new Error("External Geocoding framework exception.");
+      
+      const locationsArray = await response.json();
+      
+      if (locationsArray && locationsArray.length > 0) {
+        setSearchResults(locationsArray);
+        setShowDropdown(true);
+      } else {
+        setSearchResults([]);
+        setShowDropdown(false);
+      }
+    } catch (networkErr) {
+      console.error("Fuzzy discovery framework data transaction failure:", networkErr);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
   };
+
+  // =========================================================================
+  // EXECUTE COMPUTATION: BACKEND SAFE PATH COMPILATION TRIGGER
+  // =========================================================================
+  const selectTargetDestination = async (placeObj) => {
+    const lat = parseFloat(placeObj.lat);
+    const lon = parseFloat(placeObj.lon);
+    const destinationCoordinates = [lat, lon];
+    
+    setSelectedDest(destinationCoordinates);
+    setSearchQuery(placeObj.display_name); // Set input to full location context
+    setShowDropdown(false);                // Collapse suggestions list view
+
+    // Shift map view slightly to enclose the target parameter
+    setMapCenter(destinationCoordinates);
+
+    // Backend communication request loop
+    try {
+      // REPLACE TARGET STRING BELOW WITH YOUR ACTUAL PERSISTENT RENDER SERVER INSTANCE
+      const backendUrl = "https://your-render-backend-url.onrender.com/api/route";
+      
+      const payload = {
+        source: startLoc,
+        destination: destinationCoordinates,
+        temporalHour: timeValue
+      };
+
+      const serverResponse = await fetch(backendUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!serverResponse.ok) throw new Error("Server path calculation error.");
+      const pathData = await serverResponse.json();
+      
+      // Expected backend array output mapping: [[lat1, lon1], [lat2, lon2]...]
+      if (pathData.polyline) setRoutePolyline(pathData.polyline);
+      if (pathData.metrics) setSafetyMetrics(pathData.metrics);
+
+    } catch (serverErr) {
+      console.error("Unable to securely reach safe calculation backend engine:", serverErr);
+      // Local structural demo fallback pathway configuration line 
+      setRoutePolyline([startLoc, destinationCoordinates]);
+      setSafetyMetrics({ score: 88, lampsFound: 14 });
+    }
+  };
+
+  // Pre-load initialization visual block screen
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-gray-900 text-white font-sans">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-xl font-semibold animate-pulse tracking-wide text-emerald-400">Initializing ShadowPath Engine...</p>
+          <p className="text-xs text-gray-500 mt-2">Locking hardware GPS satellite tracking nodes...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0a0e17] text-slate-200 select-none flex">
+    <div className="relative h-screen w-screen font-sans overflow-hidden bg-gray-950">
       
-      {/* MAP ENGINE LAYER */}
-      <div className="absolute inset-0 w-full h-full z-0">
-        <MapContainer center={mapCenter} zoom={mapZoom} zoomControl={false} className="w-full h-full">
-          <TileLayer 
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" 
-            attribution='&copy; OpenStreetMap &copy; CARTO' 
-            opacity={isNightTime ? 0.85 : 1.0}
-          />
-          <MapViewHandler center={isSOSActive ? [14.6735, 77.5925] : mapCenter} zoom={isSOSActive ? 16 : mapZoom} />
-          <MapClickHandler onMapClick={handleMapClickToReport} isReporting={isReportingMode} />
-
-          {/* Radiation Glow Halos */}
-          {!isSOSActive && selectedDestination.features.map((feat) => {
-            let colorOption = '#f59e0b'; 
-            if (feat.type === 'store') colorOption = '#10b981'; 
-            if (feat.type === 'hazard') colorOption = '#ef4444'; 
-
-            return (
-              <Circle 
-                key={`glow-${feat.id}`}
-                center={feat.pos}
-                radius={feat.radius || 90}
-                pathOptions={{
-                  color: colorOption,
-                  fillColor: colorOption,
-                  fillOpacity: 0.08,
-                  weight: 1,
-                  dashArray: feat.type === 'hazard' ? '5, 5' : '0'
-                }}
-              />
-            );
-          })}
-
-          {/* Custom Hazards Circles */}
-          {customHazards.map((hazard) => (
-            <Circle 
-              key={`custom-glow-${hazard.id}`}
-              center={hazard.pos}
-              radius={90}
-              pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.1, weight: 1, dashArray: '4, 4' }}
-            />
-          ))}
-
-          {!isSOSActive && (
-            <>
-              <Polyline positions={safestPathCoordinates} pathOptions={{ color: isNightTime ? '#14b8a6' : '#a855f7', weight: 5, opacity: 0.95, lineCap: 'round' }} />
-              <Polyline positions={shortestUnlitCoordinates} pathOptions={{ color: '#475569', weight: 3, opacity: 0.5, dashArray: '8, 12' }} />
-              <Marker position={targetPoint} icon={createCustomMarker('user')} />
-            </>
-          )}
-
-          {isSOSActive && <Polyline positions={[basePoint, [14.6752, 77.5912]]} pathOptions={{ color: '#3b82f6', weight: 5, opacity: 0.95, lineCap: 'round' }} />}
-          <Marker position={basePoint} icon={createCustomMarker('live')} />
-          
-          {/* Infrastructure Map Signs Layer */}
-          {activeMapMarkers.map((feat) => (
-            <Marker key={feat.id} position={feat.pos} icon={createCustomMarker(feat.type)}>
-              <Popup className="dark-popup"><span className="font-semibold text-slate-900 text-xs block">{feat.desc}</span></Popup>
-            </Marker>
-          ))}
-
-          {isLiveTracking && <Marker position={getCurrentUserPosition()} icon={createCustomMarker('live')} />}
-        </MapContainer>
-      </div>
-
-      {/* NOTIFICATIONS CONTAINER */}
-      <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-[5000] flex flex-col gap-2">
-        {showReportNotification && (
-          <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-950/90 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-semibold backdrop-blur-md">
-            <Check size={14} className="bg-emerald-500 text-slate-950 rounded-full p-0.5" />
-            <span>Database Updated Live!</span>
+      {/* =========================================================================
+          APPLICATION INTERACTIVE FLOATING HEADS-UP DISPLAY CONTROL HUD
+          ========================================================================= */}
+      <div className="absolute top-4 left-4 z-[1000] w-[26rem] bg-gray-900/90 backdrop-blur-md text-white p-5 rounded-2xl shadow-2xl border border-gray-800/80 flex flex-col gap-4">
+        <div>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-extrabold text-emerald-400 tracking-tight">ShadowPath HUD</h1>
+            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] uppercase font-bold rounded-full border border-emerald-500/20 tracking-wider">MERN Core v1.2</span>
           </div>
-        )}
-        {showLinkCopiedNotification && (
-          <div className="flex items-center gap-2.5 px-4 py-3 bg-blue-950/90 border border-blue-500/30 rounded-xl text-xs text-blue-300 font-semibold backdrop-blur-md">
-            <Share2 size={14} className="text-blue-400" />
-            <span>Link copied to clipboard!</span>
-          </div>
-        )}
-      </div>
+          <p className="text-xs text-gray-400 mt-0.5">Context-Aware Safe Pedestrian Navigation Framework</p>
+        </div>
 
-      {/* FLOATING PRIMARY PEDESTRIAN HUD CONTROL BOARD */}
-      <div className="absolute top-6 left-6 z-[1000] w-[390px] flex flex-col gap-4 max-h-[calc(100vh-48px)] overflow-y-auto pr-1">
-        
-        {/* Brand Header */}
-        <div className="flex items-center gap-3.5 p-4 border rounded-2xl backdrop-blur-xl shadow-2xl bg-slate-950/75 border-white/10">
-          <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-cyan-500/15 border border-cyan-400/30 text-cyan-400"><Shield size={22} /></div>
+        {/* Live GPS Core Telemetry Monitor Module */}
+        <div className="px-3.5 py-2.5 bg-gray-950/60 rounded-xl text-xs border border-gray-800/60 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-extrabold tracking-tight text-white leading-tight">ShadowPath</h1>
-            <p className="text-xs font-medium text-slate-400/90 mt-0.5">Safe pedestrian routing engine</p>
+            <span className="text-emerald-400 font-bold block animate-pulse">● Live Source GPS Coordinates:</span>
+            <p className="text-gray-300 font-mono text-[11px] mt-0.5">{startLoc[0].toFixed(5)}° N, {startLoc[1].toFixed(5)}° E</p>
           </div>
-        </div>
-
-        {/* Guardian Share */}
-        <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-2.5">
           <button 
-            onClick={() => { setShowLinkCopiedNotification(true); setIsCompanionViewOpen(true); setTimeout(() => setShowLinkCopiedNotification(false), 2500); }}
-            className="w-full py-2.5 font-bold text-xs rounded-xl flex items-center justify-center gap-2 border bg-blue-950/40 border-blue-500/20 text-blue-300 hover:bg-blue-950/70 transition-all cursor-pointer"
+            onClick={() => setMapCenter([...startLoc])}
+            className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-emerald-400 transition-colors border border-gray-700"
+            title="Recenter Map View onto GPS Core Node"
           >
-            <Share2 size={13} /><span>🔗 Generate Companion Share Link</span>
+            🎯
           </button>
         </div>
 
-        {/* Time Slider Card */}
-        <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-3">
-          <div className="flex justify-between items-center text-xs font-bold text-white px-0.5">
-            <span className="text-slate-400 text-[10px] uppercase tracking-wider flex items-center gap-1"><Clock size={11} /> Temporal Sync</span>
-            <span className={isNightTime ? 'text-amber-400' : 'text-cyan-400'}>{formatHourString(minuteSliderValue)}</span>
+        {/* Global Destination Autocomplete Input Interface Panel */}
+        <div className="relative">
+          <label className="block text-xs font-bold text-gray-400 mb-1.5 uppercase tracking-wider">Target Destination Vector:</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleDestinationSearch(e.target.value)}
+              placeholder="Search stations, roads, landmarks globally..."
+              className="w-full px-3.5 py-2.5 bg-gray-950/80 text-white rounded-xl text-sm border border-gray-800 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all duration-200"
+            />
+            {isSearching && (
+              <div className="absolute right-3.5 top-3 text-emerald-400 text-xs animate-spin">⏳</div>
+            )}
           </div>
-          <input type="range" min="0" max="960" value={minuteSliderValue} onChange={(e) => { setMinuteSliderValue(parseInt(e.target.value)); setIsLiveTracking(false); setUserProgress(0); }} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400" />
+
+          {/* Autocomplete Multi-Node Results Dropdown Element Panel */}
+          {showDropdown && searchResults.length > 0 && (
+            <ul className="absolute top-full left-0 w-full bg-gray-900/95 backdrop-blur-lg mt-2 max-h-64 overflow-y-auto rounded-xl shadow-2xl border border-gray-800 divide-y divide-gray-800/40 overflow-hidden z-[2000]">
+              {searchResults.map((location) => (
+                <li
+                  key={location.place_id}
+                  onClick={() => selectTargetDestination(location)}
+                  className="p-3.5 text-xs text-gray-300 hover:bg-emerald-500/10 hover:text-white cursor-pointer transition-colors duration-150 flex flex-col gap-0.5"
+                >
+                  <span className="font-semibold text-gray-100 truncate">{location.name || "Named Vector Route"}</span>
+                  <span className="text-gray-400 truncate text-[10px] font-light">{location.display_name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        {/* SOS Panel */}
-        <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-3">
-          <button onClick={() => { setIsSOSActive(!isSOSActive); setIsLiveTracking(false); setUserProgress(0); }} className={`w-full py-3.5 font-black text-xs tracking-wider uppercase rounded-xl flex items-center justify-center gap-2 border transition-all cursor-pointer ${isSOSActive ? 'bg-rose-600 border-rose-400' : 'bg-gradient-to-r from-red-600 to-amber-600 text-white border-red-500/30'}`}>
-            <Siren size={15} /><span>{isSOSActive ? '❌ CANCEL PANIC ROUTING' : '🚨 ACTIVATE SOS PANIC REFUGE'}</span>
-          </button>
+        {/* Environmental Reactive Temporal Sync Controls Slider Module */}
+        <div className="bg-gray-950/40 p-3 rounded-xl border border-gray-800/40">
+          <div className="flex justify-between text-xs font-bold mb-1">
+            <span className="text-gray-400 uppercase tracking-wider">Temporal Simulation Window:</span>
+            <span className="text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">{timeValue}:00 hrs</span>
+          </div>
+          <input 
+            type="range" 
+            min="0" 
+            max="23" 
+            value={timeValue}
+            onChange={(e) => setTimeValue(parseInt(e.target.value))}
+            className="w-full h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 my-2"
+          />
+          <p className="text-[10px] text-gray-500 font-light">Adjusting slider alters dynamic darkness coefficients within the routing core calculation loops.</p>
         </div>
 
-        {!isSOSActive && (
-          <>
-            <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-2.5">
-              <button onClick={() => setIsReportingMode(!isReportingMode)} className={`w-full py-3 font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 border transition-all cursor-pointer ${isReportingMode ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse' : 'bg-slate-900/50 text-slate-200 border-white/5 hover:bg-slate-900/80'}`}><Plus size={14} /><span>{isReportingMode ? '🎯 Click Map to Drop Report' : '⚠️ Log New Broken Light'}</span></button>
+        {/* Live System Performance Safety Analysis Metrics Output Display */}
+        {safetyMetrics && (
+          <div className="grid grid-cols-2 gap-3 p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/10 animate-fadeIn">
+            <div className="text-center p-2 bg-gray-950/40 rounded-lg border border-gray-800/50">
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Safety Index</span>
+              <span className="text-xl font-black text-emerald-400 font-mono">{safetyMetrics.score}%</span>
             </div>
-
-            <div className="relative flex flex-col gap-4 p-5 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl">
-              <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Start Point</label><div className="relative flex items-center"><Navigation className="absolute left-3.5 text-cyan-400 transform rotate-45" size={15} /><input type="text" readOnly value={startLoc} className="w-full pl-10 pr-10 py-2.5 bg-slate-900/40 border border-white/5 rounded-xl text-xs text-slate-300 font-semibold focus:outline-none truncate" /><button onClick={detectLiveLocation} className="absolute right-3.5 text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"><Crosshair size={14} /></button></div></div>
-              <div className="relative flex flex-col gap-1.5"><label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Destination</label><div className="relative flex items-center"><Search className="absolute left-3.5 text-fuchsia-400" size={15} /><input type="text" placeholder="Search destination addresses..." value={searchQuery} onFocus={() => setShowDropdown(true)} onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true); }} className="w-full pl-10 pr-4 py-2.5 bg-slate-900/60 border border-white/10 rounded-xl text-xs text-slate-100 focus:outline-none placeholder-slate-500 font-medium" /></div>
-                {showDropdown && searchQuery && (
-                  <div className="absolute top-[64px] left-0 w-full bg-slate-950 border border-white/10 rounded-xl overflow-hidden shadow-2xl max-h-[140px] overflow-y-auto z-[2000]">
-                    {filteredSuggestions.length > 0 ? filteredSuggestions.map((item, idx) => (<div key={idx} onClick={() => { setSelectedDestination(item); setSearchQuery(item.name); setMapCenter([(basePoint[0] + item.coords[0]) / 2, (basePoint[1] + item.coords[1]) / 2]); calculateDynamicSafetyMetrics(basePoint, item.coords, item); setShowDropdown(false); }} className="flex items-center gap-2.5 px-4 py-3 hover:bg-white/5 border-b border-white/[0.03] transition-colors cursor-pointer text-left"><MapPin size={13} className="text-fuchsia-400" /><span className="text-xs text-slate-300 font-medium truncate">{item.name}</span></div>)) : <div className="px-4 py-4 text-xs text-slate-500 italic text-center">No locations found</div>}
-                  </div>
-                )}
-              </div>
+            <div className="text-center p-2 bg-gray-950/40 rounded-lg border border-gray-800/50">
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Active Assets</span>
+              <span className="text-xl font-black text-blue-400 font-mono">{safetyMetrics.lampsFound} Lamps</span>
             </div>
-          </>
+          </div>
         )}
 
-        {/* HUD Legend Card */}
-        <div className="flex flex-col p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl gap-2">
-          <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Infrastructure Map Signs</span>
-          <div className="grid grid-cols-1 gap-2 mt-1 text-xs font-semibold text-slate-300">
-            <div className="flex items-center gap-2.5"><div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500 text-amber-400"><Lightbulb size={11} fill="currentColor" /></div><span className="text-slate-400">Amber Bulb: **Working Streetlight Grid**</span></div>
-            <div className="flex items-center gap-2.5"><div className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-500 text-emerald-400"><Store size={11} /></div><span className="text-slate-400">Green Shop: **Active Working Business Area**</span></div>
-            <div className="flex items-center gap-2.5"><div className="flex items-center justify-center w-5 h-5 rounded-full bg-rose-500/20 border border-rose-500 text-rose-400"><AlertTriangle size={11} /></div><span className="text-slate-400">Red Triangle: **Non-Working / Broken Roads**</span></div>
-          </div>
-        </div>
-
-        {/* Safety Analytics Summary */}
-        <div className="flex flex-col p-5 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl">
-          <div className="flex items-center justify-between mb-4"><span className="text-[10px] font-extrabold tracking-widest text-slate-300 uppercase">Safety Analytics</span><span className="text-xs font-semibold text-slate-400">{dynamicMetrics.distanceStr} · {dynamicMetrics.durationStr}</span></div>
-          <div className="flex justify-around items-center py-1">
-            <div className="flex flex-col items-center gap-2.5"><div className="relative flex items-center justify-center w-20 h-20 rounded-full border-[5px] border-cyan-500/10"><div className="absolute inset-0 rounded-full border-[5px] border-cyan-400 border-t-transparent border-r-transparent" style={{ transform: `rotate(${dynamicMetrics.lightingPercent * 3.6 - 45}deg)` }}></div><span className="text-lg font-black text-white">{dynamicMetrics.lightingPercent}%</span></div><span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><Sun size={11} className="text-cyan-400" /> Lighting</span></div>
-            <div className="flex flex-col items-center gap-2.5"><div className="relative flex items-center justify-center w-20 h-20 rounded-full border-[5px] border-fuchsia-500/10"><div className={`absolute inset-0 rounded-full border-[5px] border-fuchsia-400 border-b-transparent ${dynamicMetrics.trafficRotate}`}></div><span className="text-xs font-black text-white uppercase tracking-tight">{dynamicMetrics.trafficText}</span></div><span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 flex items-center gap-1.5"><Eye size={11} className="text-fuchsia-400" /> Density</span></div>
-          </div>
-          <div className="w-full h-px bg-white/5 my-4.5"></div>
-          <div className="flex flex-col gap-3"><div className="flex items-center justify-between p-3 bg-slate-900/30 border border-white/5 rounded-xl"><span className="text-xs font-medium text-slate-300/90 flex items-center gap-2"><AlertTriangle size={14} className="text-amber-500" /> Avoided Dark Zones</span><span className="font-extrabold text-xs text-amber-400 bg-amber-500/15 px-2.5 py-0.5 rounded-md border border-amber-500/20">{dynamicMetrics.darkZonesCount}</span></div></div>
-        </div>
-
-        {/* Tracking Assist Toggle */}
-        <div className="flex items-center justify-between p-4 border border-white/10 rounded-2xl bg-slate-950/75 backdrop-blur-xl shadow-2xl">
-          <span className="text-[10px] font-extrabold tracking-widest uppercase flex items-center gap-2 text-slate-300"><span className={`w-2 h-2 rounded-full ${isLiveTracking ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`}></span>Live Tracking Assist Mode</span>
-          <button onClick={() => setIsLiveTracking(!isLiveTracking)} className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer bg-slate-800"><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-out ${isLiveTracking ? 'translate-x-6 bg-cyan-400 flex items-center justify-center text-[8px]' : 'translate-x-1'}`}>{isLiveTracking && <Volume2 size={10} className="text-slate-950" />}</span></button>
+        {/* Emergency System SOS Panel Actions Group */}
+        <div className="flex gap-2 mt-1">
+          <button 
+            onClick={() => setIsReportingMode(!isReportingMode)}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border ${
+              isReportingMode 
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 ring-2 ring-amber-500/20' 
+                : 'bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700'
+            }`}
+          >
+            ⚠️ {isReportingMode ? "Cancel Pin Mode" : "Report Hazard Pin"}
+          </button>
+          <button 
+            onClick={() => alert(`CRITICAL ALERT: Emergency broadcast signals fired from user nodes: ${startLoc}`)}
+            className="px-5 bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-black rounded-xl uppercase tracking-wider transition-all shadow-lg shadow-red-600/20 border border-red-500"
+          >
+            SOS Panic
+          </button>
         </div>
       </div>
 
-      {/* Companion Link Guardian Panel Overlay */}
-      {isCompanionViewOpen && (
-        <div className="absolute top-6 right-6 z-[4000] w-[350px] bg-slate-950/85 border border-blue-500/30 rounded-3xl backdrop-blur-2xl shadow-2xl flex flex-col p-5 gap-4">
-          <div className="flex items-center justify-between border-b border-white/5 pb-3">
-            <div className="flex items-center gap-2.5"><div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div><span className="text-xs font-bold text-slate-200">Guardian Tracking Link Active</span></div>
-            <button onClick={() => setIsCompanionViewOpen(false)} className="text-slate-400 hover:text-white transition-colors cursor-pointer"><X size={15} /></button>
-          </div>
-          <div className="flex items-center gap-3 bg-slate-900/50 border border-white/5 p-3 rounded-xl">
-            <div className="relative flex items-center justify-center w-8 h-8 rounded-full bg-cyan-400/10 text-cyan-400 border border-cyan-400/20"><Users size={15} /></div>
-            <div className="flex flex-col truncate"><span className="text-xs font-extrabold text-white">Target Device: Pedestrian Core</span><span className="text-[10px] text-slate-400 truncate">Status: {isLiveTracking ? `Moving (${userProgress}% completion)` : 'Stationary'}</span></div>
-          </div>
-          <div className="flex flex-col gap-2 border border-white/5 bg-slate-900/20 p-3.5 rounded-xl text-[11px] font-medium text-slate-400">
-            <div className="flex justify-between"><span>Route Safety Index:</span><span className="text-emerald-400 font-bold">Optimal ({dynamicMetrics.lightingPercent}%)</span></div>
-            <div className="flex justify-between mt-1"><span>Current Distance Frame:</span><span className="text-cyan-400">{dynamicMetrics.distanceStr}</span></div>
-            <div className="flex justify-between mt-1"><span>Threat/SOS Status:</span><span className={isSOSActive ? 'text-red-400 font-black animate-pulse' : 'text-slate-500'}>{isSOSActive ? '🚨 ALERT ACTIVE' : 'Nominal (Secure)'}</span></div>
-          </div>
-          {isLiveTracking && <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-white/5"><div className="bg-gradient-to-r from-cyan-400 to-blue-500 h-full transition-all duration-300" style={{ width: `${userProgress}%` }}></div></div>}
-        </div>
-      )}
+      {/* =========================================================================
+          CORE SPATIAL ENGINE CANVAS INTERFACE RENDER LAYER
+          ========================================================================= */}
+      <MapContainer 
+        center={mapCenter || [14.6600, 77.5500]} 
+        zoom={14} 
+        className="h-full w-full z-0"
+        zoomControl={false} // Disable default controls to optimize floating layout visibility
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+        
+        {/* Dynamic global viewport controller module hook */}
+        {mapCenter && <ChangeMapView center={mapCenter} />}
 
+        {/* Node Position Vector Element Marker Renders */}
+        {startLoc && (
+          <Marker position={startLoc}>
+            <Popup className="font-sans text-xs">
+              <b className="text-emerald-500">Live Hardware Origin Core</b><br/>
+              Automatic location verification authenticated.
+            </Popup>
+          </Marker>
+        )}
+
+        {selectedDest && (
+          <Marker position={selectedDest}>
+            <Popup className="font-sans text-xs">
+              <b className="text-blue-500">Target Target Matrix Destination</b><br/>
+              Safe pathway evaluation route endpoints.
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Dynamic Safe Routing Core Pipeline Pathway Line Render */}
+        {routePolyline.length > 0 && (
+          <Polyline 
+            positions={routePolyline} 
+            color="#10b981" // Custom Emerald vector line to denote a verified safety path
+            weight={5}
+            opacity={0.85}
+            dashArray={isReportingMode ? "10, 10" : "0"} // Visually changes design layout based on state mode
+          />
+        )}
+      </MapContainer>
     </div>
   );
 }

@@ -1,3 +1,6 @@
+/* =========================================================================
+   1. GLOBAL RESET & CORE LAYOUT
+   ========================================================================= */
 * {
   margin: 0;
   padding: 0;
@@ -8,10 +11,73 @@ body {
   overflow: hidden;
   background: #0a0e1a;
   font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  width: 100vw;
+  height: 100vh;
+  color: #e0e7ff;
 }
 
 #root {
+  position: relative; /* Ensures floating HUD panels align correctly over the map */
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+}
+
+/* =========================================================================
+   2. LEAFLET MAP ENGINE OVERRIDES
+   ========================================================================= */
+/* This ensures the map fills the entire screen behind your UI cards */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  z-index: 0; /* Forces the map to stay as the background layer */
+  background: #0a0e1a !important; /* Prevents white flash during tile loading */
+}
+
+/* Custom Marker Shadow Effect */
+.leaflet-marker-icon {
+  filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.4));
+}
+
+/* =========================================================================
+   3. CUSTOM HUD SCROLLBAR (Sleek Dark Theme)
+   ========================================================================= */
+/* Targets the sidebar container specifically */
+.hud-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.hud-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.hud-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+}
+
+.hud-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.6);
+}
+
+/* =========================================================================
+   4. ANIMATION ENGINE
+   ========================================================================= */
+@keyframes gpsPulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(34, 211, 238, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+}
+
+.gps-detecting {
+  animation: gpsPulse 1.5s infinite;
+  border: 2px solid #22d3ee !important;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }

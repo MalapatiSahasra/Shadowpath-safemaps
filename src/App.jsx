@@ -234,13 +234,14 @@ export default function App() {
   const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
   const [isNightMode,    setIsNightMode]    = useState(false);
 
+  // Synchronized System Clock
   useEffect(() => {
     const tick = () => {
       const now = new Date();
       setTemporalHour(now.getHours());
       setTemporalMinute(now.getMinutes());
     };
-    const id = setInterval(tick, 30000);
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -248,6 +249,7 @@ export default function App() {
     setIsNightMode(temporalHour >= 19 || temporalHour < 6);
   }, [temporalHour]);
 
+  // GPS Localization Initialization
   useEffect(() => {
     if (!navigator.geolocation) {
       setupWorkspace(FALLBACK_CENTER);
@@ -285,74 +287,85 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // INFRASTRUCTURE-LOCKED DIRECT SNAP ROUTING PIPELINE
+  // DIRECTIONAL ENVIRONMENT SNAP ROUTING PIPELINE
   const calculateSafetyRoutes = useCallback(() => {
     if (!startLocation || !destination) return;
 
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
 
-    // 1. Building Safest Path: Snap strictly directly onto Working Streetlights & Open Safe Hubs
+    // Calculate original line distance constraints
+    const totalLineDist = Math.sqrt(Math.pow(endPt[0] - startPt[0], 2) + Math.pow(endPt[1] - startPt[1], 2));
+
+    // 1. Building Safest Path: Filter out backward zigzag coordinates
     const safeWaypoints = [startPt];
     const activeSafeNodes = [
       ...lights.filter(l => l.status === "online"),
       ...businesses.filter(b => b.open)
     ];
 
-    // Proximity sorting loop vector matching trajectory coordinates
-    activeSafeNodes.sort((a, b) => {
+    // Filter constraint: only load nodes that help move forward towards destination bounds
+    const forwardSafeNodes = activeSafeNodes.filter(node => {
+      const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
+      return nodeToDestDist < totalLineDist;
+    });
+
+    // Sort nodes to form a forward-progressing sequence chain
+    forwardSafeNodes.sort((a, b) => {
       const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
       const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
       return distA - distB;
     });
 
-    // Snap path coordinates exactly onto physical light locations
-    activeSafeNodes.forEach(node => {
-      if (safeWaypoints.length < 6) {
-        safeWaypoints.push([node.lat, node.lng]);
-      }
+    forwardSafeNodes.slice(0, 4).forEach(node => {
+      safeWaypoints.push([node.lat, node.lng]);
     });
     safeWaypoints.push(endPt);
     setSafestRoute(safeWaypoints);
 
-    // 2. Building Danger Path: Snap through unlit sectors, broken torches and recorded hazards
+    // 2. Building Danger Path: Routes explicitly through unlit regions and broken lights
     const dangerWaypoints = [startPt];
     const highRiskNodes = [
       ...lights.filter(l => l.status === "offline"),
       ...hazardPins
     ];
 
-    highRiskNodes.sort((a, b) => {
+    const forwardRiskNodes = highRiskNodes.filter(node => {
+      const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
+      return nodeToDestDist < totalLineDist;
+    });
+
+    forwardRiskNodes.sort((a, b) => {
       const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
       const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
       return distA - distB;
     });
 
-    highRiskNodes.forEach(node => {
-      if (dangerWaypoints.length < 5) {
-        dangerWaypoints.push([node.lat, node.lng]);
-      }
+    forwardRiskNodes.slice(0, 3).forEach(node => {
+      dangerWaypoints.push([node.lat, node.lng]);
     });
     
     if (dangerWaypoints.length === 1) {
-      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0016;
-      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0016;
+      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0015;
+      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0015;
       dangerWaypoints.push([midLat, midLng]);
     }
     dangerWaypoints.push(endPt);
     setDangerRoute(dangerWaypoints);
 
-    const totalSafeAssetsOnRoute = lights.filter(l => l.status === "online").length;
+    // Scoring Engine calculation
+    const totalSafeAssetsOnRoute = forwardSafeNodes.length;
     const computedScore = isNightMode 
-      ? Math.min(98, 55 + totalSafeAssetsOnRoute * 4) 
-      : Math.min(99, 92 + totalSafeAssetsOnRoute * 1);
+      ? Math.min(98, 58 + totalSafeAssetsOnRoute * 5) 
+      : Math.min(99, 94 + totalSafeAssetsOnRoute * 1);
       
     setSafetyScore(computedScore);
-    showNotification(`Illumination tracking loaded. Safety Factor: ${computedScore}%`, "success");
+    showNotification(`Forward trajectory safety path optimized. Grid Factor: ${computedScore}%`, "success");
   }, [startLocation, destination, lights, hazardPins, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
 
+  // SOS Safety Emergency Action Route Target Switcher
   const handleSOSPanicDispatch = () => {
     if (!userLocation || refugeHubs.length === 0) return;
     setSosActive(true);
@@ -375,11 +388,11 @@ export default function App() {
     ];
 
     setSafestRoute(escapeWaypoints);
-    setDangerRoute(null); 
+    setDangerRoute(null); // Terminate danger routes to prevent confusion
     setMapCenter([nearestHub.lat, nearestHub.lng]);
 
     showNotification(
-      `🚨 EMERGENCY: Transmitted tracking link to contacts ${EMERGENCY_CONTACTS.join(" & ")}. Locked refuge center: ${nearestHub.name}`,
+      `🚨 SOS CRITICAL: Coordinates sent to ${EMERGENCY_CONTACTS.join(" & ")}. Route locked onto closest safe area: ${nearestHub.name}`,
       "danger"
     );
   };
@@ -413,7 +426,7 @@ export default function App() {
       {notification && <div style={{ ...styles.toast, borderColor: toastColors[notification.type] }}>{notification.msg}</div>}
       {isNightMode && <div style={styles.nightOverlay} />}
 
-      {/* RENDER SPACE BASE LAYER MAP CONTAINER UNDERLAY */}
+      {/* RENDER SPACE BASE LAYER MAP FRAME */}
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={15} style={{ width: "100%", height: "100%" }} zoomControl={false}>
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
@@ -423,11 +436,11 @@ export default function App() {
           {startLocation && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* DUAL PATHWAY GEOMETRIC COGNITIVE OVERLAYS */}
+          {/* SAFEST (GREEN) VS DANGEROUS (RED DASHED) PATH LINE STRIPS */}
           {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 5, opacity: 0.95 }} />}
           {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
-          {/* Working streetlights with custom glowing auras tracking directly on the route */}
+          {/* Working Streetlight Nodes with glow area overlay circles */}
           {lights.map((l) => (
             <div key={l.id}>
               <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
@@ -440,7 +453,7 @@ export default function App() {
           {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
           {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
 
-          {/* DISPATCH EMERGENCY REFUGE HUBS */}
+          {/* SECURITY & CLINICAL SECURITY HUBS */}
           {refugeHubs.map((hub) => (
             <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}>
               <Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup>
@@ -453,7 +466,7 @@ export default function App() {
         </MapContainer>
       </div>
 
-      {/* DASHBOARD CONSOLE INTERFACE FOREGROUND PANEL HUD */}
+      {/* DASHBOARD CONSOLE HUD INTERFACE OVERLAY */}
       <div className="hud-scrollbar" style={styles.hud}>
         <div style={styles.header}>
           <div style={styles.logoBox}><span style={{ fontSize: 22 }}>🛡️</span></div>
@@ -492,13 +505,13 @@ export default function App() {
           {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
         </div>
 
-        {/* SOS INTERRUPT EMERGENCY HUB SYSTEM TRIGGER BUTTON */}
+        {/* SOS BUTTON SWITCH DISPATCHER */}
         <button style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }} onClick={handleSOSPanicDispatch}>
           🚨 {sosActive ? "SOS EMERGENCY ACCELERATED..." : "🛡️ ACTIVATE SOS PANIC REFUGE"}
         </button>
 
-        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click inside map grid layout to log hazard coordinates.", "warning"); }}>
-          ⚠️ {logMode ? "Click target point inside map frame..." : "+ Log Broken Light / Hazard Area"}
+        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click inside map grid frame to commit hazard coordinate labels.", "warning"); }}>
+          ⚠️ {logMode ? "Click target location coordinate point..." : "+ Log Broken Light / Hazard Area"}
         </button>
 
         <div style={styles.routeSection}>
@@ -520,7 +533,7 @@ export default function App() {
           <div style={styles.legendItem}>🟢 <span style={{ color: "#10b981", fontWeight: 'bold' }}>Safest Route Vector Track (Lit)</span></div>
           <div style={styles.legendItem}>🔴 <span style={{ color: "#ef4444", fontWeight: 'bold' }}>Unlit High Risk Shortcut Track</span></div>
           <div style={styles.legendItem}>💡 <span>Amber Bulbs: <strong>Active Streetlight Aura</strong></span></div>
-          <div style={styles.legendItem}>栽培 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
+          <div style={styles.legendItem}>🚓 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
         </div>
 
         <div style={styles.footer}><span>Right-click map frame to submit tags</span><span style={{ color: "#4f46e5" }}>ShadowPath v1.0</span></div>

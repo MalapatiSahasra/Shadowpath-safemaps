@@ -1,30 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import {
-  MapContainer, TileLayer, Marker, Polyline,
-  useMapEvents, Popup, Circle, useMap,
-} from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "./App.css";
 
-// ─── BACKEND API URL ─────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-// ─── FIX LEAFLET ICONS ───────────────────────────────────────────────────────
+// Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl:       "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl:     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-// ─── CUSTOM MAP ICONS ────────────────────────────────────────────────────────
+// Custom Node Icons
 const createIcon = (color, size = 14) =>
   L.divIcon({
     className: "",
-    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;
-           background:${color};border:2px solid rgba(255,255,255,0.8);
-           box-shadow:0 0 8px ${color}"></div>`,
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.8);box-shadow:0 0 8px ${color}"></div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
@@ -32,51 +23,60 @@ const createIcon = (color, size = 14) =>
 const streetlightIcon = L.divIcon({
   className: "",
   html: `<div style="font-size:18px;filter:drop-shadow(0 0 4px #f59e0b)">💡</div>`,
-  iconSize: [20, 20], iconAnchor: [10, 10],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 });
 
 const brokenLightIcon = L.divIcon({
   className: "",
   html: `<div style="font-size:18px;opacity:0.5">🔦</div>`,
-  iconSize: [20, 20], iconAnchor: [10, 10],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 });
 
 const shopIcon = L.divIcon({
   className: "",
   html: `<div style="font-size:16px;filter:drop-shadow(0 0 4px #10b981)">🏪</div>`,
-  iconSize: [20, 20], iconAnchor: [10, 10],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 });
 
 const hazardIcon = L.divIcon({
   className: "",
   html: `<div style="font-size:16px">⚠️</div>`,
-  iconSize: [20, 20], iconAnchor: [10, 10],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 });
 
-// ─── HELPER: Generate streetlights around a location ─────────────────────────
+const emergencyRefugeIcon = L.divIcon({
+  className: "",
+  html: `<div style="font-size:18px;filter:drop-shadow(0 0 6px #ef4444)">🚓</div>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+});
+
+// Simulated infrastructure data around user position
 function generateStreetlights(center) {
   const offsets = [
-    [0.002, 0.001], [0.003, 0.003], [-0.001, 0.002],
-    [0.004, -0.001], [-0.002, 0.003], [0.001, -0.002],
-    [0.003, 0.005], [-0.003, -0.001], [0.005, 0.002], [-0.001, 0.004],
+    [0.0015, 0.0010], [0.0028, 0.0025], [-0.0008, 0.0018],
+    [0.0035, -0.0008], [-0.0015, 0.0022], [0.0008, -0.0015],
+    [0.0025, 0.0042], [-0.0022, -0.0008], [0.0042, 0.0015], [-0.0008, 0.0035],
   ];
   return offsets.map((o, i) => ({
-    id: `node_${String(i + 1).padStart(2, "0")}`,
+    id: i + 1,
     lat: center[0] + o[0],
     lng: center[1] + o[1],
     status: i % 3 === 2 ? "offline" : "online",
-    lux: i % 3 === 2 ? 0 : 85,
   }));
 }
 
-// ─── HELPER: Generate businesses around a location ───────────────────────────
 function generateBusinesses(center) {
   const places = [
-    { offset: [0.003, 0.002], name: "Local Market",       open: true  },
-    { offset: [-0.002, 0.004], name: "Pharmacy",           open: true  },
-    { offset: [0.005, -0.001], name: "Restaurant",         open: false },
-    { offset: [-0.001,-0.003], name: "Convenience Store",  open: true  },
-    { offset: [0.004, 0.005],  name: "Tea Shop",           open: true  },
+    { offset: [0.0022, 0.0015], name: "Local Market Square", open: true },
+    { offset: [-0.0012, 0.0032], name: "Emergency Pharmacy 24/7", open: true },
+    { offset: [0.0040, -0.0005], name: "Central Food Court", open: false },
+    { offset: [-0.0005, -0.0022], name: "Convenience Store Hub", open: true },
+    { offset: [0.0032, 0.0040], name: "Highway Tea Junction", open: true },
   ];
   return places.map((p, i) => ({
     id: i + 1,
@@ -87,85 +87,65 @@ function generateBusinesses(center) {
   }));
 }
 
-// ─── HELPER: Draw a route line between two points ────────────────────────────
-function generateRoute(start, end) {
-  const steps = 12;
-  const route = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const curve = Math.sin(t * Math.PI) * 0.001;
-    route.push([
-      start[0] + (end[0] - start[0]) * t + curve,
-      start[1] + (end[1] - start[1]) * t + curve,
-    ]);
-  }
-  return route;
+function generateRefugeHubs(center) {
+  return [
+    { id: 101, name: "City Core Police Station", lat: center[0] + 0.0012, lng: center[1] - 0.0035, type: "Police Station" },
+    { id: 102, name: "District General Hospital", lat: center[0] - 0.0028, lng: center[1] + 0.0019, type: "Hospital" }
+  ];
 }
 
-// ─── HELPER: Reverse geocode lat/lng → address string ────────────────────────
-async function reverseGeocode(lat, lng) {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-      { headers: { "Accept-Language": "en", "User-Agent": "ShadowPath/1.0" } }
-    );
-    const data = await res.json();
-    return data.display_name?.split(",").slice(0, 3).join(", ") ||
-           `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  } catch {
-    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  }
-}
-
-// ─── HELPER: Search nearby places via Nominatim ──────────────────────────────
-async function searchNearbyPlaces(lat, lng, query = "") {
-  try {
-    const viewbox = `${lng - 0.05},${lat - 0.05},${lng + 0.05},${lat + 0.05}`;
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query || "place")}&format=json&limit=12&viewbox=${viewbox}&bounded=1`;
-    const res = await fetch(url, {
-      headers: { "Accept-Language": "en", "User-Agent": "ShadowPath/1.0" },
-    });
-    const data = await res.json();
-    return data.map((p) => ({
-      name: p.display_name.split(",").slice(0, 3).join(", "),
-      lat:  parseFloat(p.lat),
-      lng:  parseFloat(p.lon),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-// ─── MAP RECENTER COMPONENT ───────────────────────────────────────────────────
+// Map Component Helpers
 function MapRecenter({ center }) {
   const map = useMap();
-  useEffect(() => {
-    if (center) map.setView(center, map.getZoom());
-  }, [center, map]);
+  useEffect(() => { if (center) map.setView(center, map.getZoom()); }, [center, map]);
   return null;
 }
 
-// ─── MAP RIGHT-CLICK HANDLER ──────────────────────────────────────────────────
 function MapClickHandler({ onMapClick }) {
   useMapEvents({ contextmenu(e) { onMapClick(e.latlng); } });
   return null;
 }
 
-// ─── LOCATION SELECTOR COMPONENT ─────────────────────────────────────────────
-function LocationSelector({ label, value, onChange, userLocation }) {
-  const [open, setOpen]       = useState(false);
-  const [query, setQuery]     = useState(value || "");
+// Nominatim Geocoding Wrappers
+async function searchNearbyPlaces(lat, lng, query = "") {
+  try {
+    const viewbox = `${lng - 0.05},${lat - 0.05},${lng + 0.05},${lat + 0.05}`;
+    const url = query
+      ? `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=10&viewbox=${viewbox}&bounded=0&lat=${lat}&lon=${lng}`
+      : `https://nominatim.openstreetmap.org/search?q=place&format=json&limit=15&viewbox=${viewbox}&bounded=1`;
+    const res = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "ShadowPath/1.0" } });
+    const data = await res.json();
+    return data.map((p) => ({
+      name: p.display_name.split(",").slice(0, 3).join(", "),
+      lat: parseFloat(p.lat),
+      lng: parseFloat(p.lon),
+    }));
+  } catch { return []; }
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, {
+      headers: { "Accept-Language": "en", "User-Agent": "ShadowPath/1.0" }
+    });
+    const data = await res.json();
+    return data.display_name?.split(",").slice(0, 3).join(", ") || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  } catch { return `${lat.toFixed(4)}, ${lng.toFixed(4)}`; }
+}
+
+// Location Selector Component
+function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value || "");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const ref        = useRef();
+  const ref = useRef();
   const debounceRef = useRef();
 
   useEffect(() => { setQuery(value || ""); }, [value]);
 
   useEffect(() => {
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
@@ -183,60 +163,34 @@ function LocationSelector({ label, value, onChange, userLocation }) {
     setQuery(val);
     setOpen(true);
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(val), 500);
-  };
-
-  const handleFocus = async () => {
-    setOpen(true);
-    if (results.length === 0 && userLocation) {
-      setLoading(true);
-      const places = await searchNearbyPlaces(userLocation[0], userLocation[1], query || "");
-      setResults(places);
-      setLoading(false);
+    if (val.length >= 2) {
+      debounceRef.current = setTimeout(() => doSearch(val), 500);
+    } else if (val.length === 0) {
+      debounceRef.current = setTimeout(() => doSearch(""), 300);
     }
   };
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <div style={styles.inputRow}>
-        {label === "START POINT"
-          ? <span style={{ color: "#60a5fa", fontSize: 14, flexShrink: 0 }}>➤</span>
-          : <span style={{ color: "#a78bfa", fontSize: 14, flexShrink: 0 }}>🔍</span>}
-
+      <div style={{ ...styles.inputRow, ...(label === "START POINT" && gpsDetecting ? { border: "1px solid rgba(34,211,238,0.5)" } : {}) }}>
+        {label === "START POINT" ? (
+          gpsDetecting ? ( <span className="gps-detecting" style={{ width: 10, height: 10, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} /> ) : ( <span style={{ color: "#60a5fa", fontSize: 14 }}>➤</span> )
+        ) : ( <span style={{ color: "#a78bfa", fontSize: 14 }}>🔍</span> )}
         <input
           style={styles.locationInput}
           value={query}
-          placeholder={label === "START POINT" ? "Your current location..." : "Search destination near you..."}
+          placeholder={label === "START POINT" ? "Detecting location..." : "Search destination..."}
           onChange={handleChange}
-          onFocus={handleFocus}
+          onFocus={() => setOpen(true)}
         />
-
-        {loading && <span style={{ fontSize: 10, color: "#6366f1", flexShrink: 0 }}>⏳</span>}
-
-        {label === "START POINT" && (
-          <button
-            style={styles.gpsBtn}
-            title="Use my GPS"
-            onClick={async () => {
-              if (!navigator.geolocation) return;
-              navigator.geolocation.getCurrentPosition(async (pos) => {
-                const { latitude: lat, longitude: lng } = pos.coords;
-                const name = await reverseGeocode(lat, lng);
-                onChange({ name, lat, lng });
-                setQuery(name);
-              }, () => alert("Location access denied. Please allow it in browser settings."));
-            }}
-          >🎯</button>
-        )}
+        {loading && <span style={{ fontSize: 10, color: "#6366f1" }}>⏳</span>}
       </div>
 
-      {/* Dropdown results */}
       {open && results.length > 0 && (
         <div style={styles.dropdown}>
           {results.map((loc, i) => (
             <div
-              key={i}
-              style={styles.dropdownItem}
+              key={i} style={styles.dropdownItem}
               onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(99,102,241,0.2)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               onMouseDown={() => {
@@ -245,375 +199,290 @@ function LocationSelector({ label, value, onChange, userLocation }) {
                 setOpen(false);
               }}
             >
-              <span style={{ marginRight: 6, opacity: 0.6, flexShrink: 0 }}>📍</span>
+              <span style={{ marginRight: 6 }}>📍</span>
               <span style={{ fontSize: 11, lineHeight: 1.4 }}>{loc.name}</span>
             </div>
           ))}
-        </div>
-      )}
-
-      {open && loading && results.length === 0 && (
-        <div style={{ ...styles.dropdown, padding: "12px", textAlign: "center", color: "#6b7280", fontSize: 12 }}>
-          Searching nearby places...
-        </div>
-      )}
-
-      {open && !loading && results.length === 0 && query.length >= 2 && (
-        <div style={{ ...styles.dropdown, padding: "12px", textAlign: "center", color: "#6b7280", fontSize: 12 }}>
-          No places found. Try a different search.
         </div>
       )}
     </div>
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const FALLBACK = [14.6790, 77.6030]; // Anantapur fallback if GPS denied
+  const FALLBACK_CENTER = [14.6790, 77.6030];
+  const EMERGENCY_CONTACTS = ["+91 94405 82131", "+91 91107 43902"];
 
   const [userLocation,   setUserLocation]   = useState(null);
-  const [mapCenter,      setMapCenter]      = useState(FALLBACK);
+  const [mapCenter,      setMapCenter]      = useState(FALLBACK_CENTER);
   const [startLocation,  setStartLocation]  = useState(null);
   const [destination,    setDestination]    = useState(null);
-  const [route,          setRoute]          = useState(null);
+  
+  const [safestRoute,    setSafestRoute]    = useState(null);
+  const [dangerRoute,    setDangerRoute]    = useState(null);
+  
   const [hazardPins,     setHazardPins]     = useState([]);
   const [sosActive,      setSosActive]      = useState(false);
   const [shareLink,      setShareLink]      = useState(null);
-  const [temporalHour,   setTemporalHour]   = useState(new Date().getHours());
   const [lights,         setLights]         = useState([]);
   const [businesses,     setBusinesses]     = useState([]);
+  const [refugeHubs,     setRefugeHubs]     = useState([]);
   const [safetyScore,    setSafetyScore]    = useState(null);
   const [logMode,        setLogMode]        = useState(false);
   const [notification,   setNotification]   = useState(null);
-  const [isNightMode,    setIsNightMode]    = useState(false);
-  const [locationStatus, setLocationStatus] = useState("📡 Detecting your location...");
+  const [locationStatus, setLocationStatus] = useState("Initializing Navigation Workspace...");
+  const [gpsDetecting,   setGpsDetecting]   = useState(true);
 
-  // ── Step 1: Get GPS on app load ──────────────────────────────────────────
+  const [temporalHour,   setTemporalHour]   = useState(new Date().getHours());
+  const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
+  const [isNightMode,    setIsNightMode]    = useState(false);
+
+  // Synchronized Clock Ticker
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      setTemporalHour(now.getHours());
+      setTemporalMinute(now.getMinutes());
+    };
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    setIsNightMode(temporalHour >= 19 || temporalHour < 6);
+  }, [temporalHour]);
+
+  // GPS Initialization Mount
   useEffect(() => {
     if (!navigator.geolocation) {
-      initFallback();
+      setupWorkspace(FALLBACK_CENTER);
       return;
     }
-    setLocationStatus("📡 Detecting your location...");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        const center = [lat, lng];
-        setUserLocation(center);
-        setMapCenter(center);
-        setBusinesses(generateBusinesses(center));
-        const name = await reverseGeocode(lat, lng);
-        setStartLocation({ name, lat, lng });
+        const center = [pos.coords.latitude, pos.coords.longitude];
+        setupWorkspace(center);
+        const name = await reverseGeocode(center[0], center[1]);
+        setStartLocation({ name, lat: center[0], lng: center[1] });
         setLocationStatus(`📍 ${name}`);
-        // fetch lights from backend
-        fetchLights(center);
+        setGpsDetecting(false);
       },
-      () => initFallback(),
-      { enableHighAccuracy: true, timeout: 10000 }
+      () => {
+        setupWorkspace(FALLBACK_CENTER);
+        setStartLocation({ name: "Anantapur Core District", lat: FALLBACK_CENTER[0], lng: FALLBACK_CENTER[1] });
+        setLocationStatus("⚠️ GPS Offline. Fallback Center Loaded.");
+        setGpsDetecting(false);
+      },
+      { enableHighAccuracy: true }
     );
   }, []);
 
-  // ── Step 2: Watch GPS as user moves ─────────────────────────────────────
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      async (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        const center = [lat, lng];
-        setUserLocation(center);
-        setMapCenter(center);
-        setBusinesses(generateBusinesses(center));
-        if (!destination) {
-          const name = await reverseGeocode(lat, lng);
-          setStartLocation({ name, lat, lng });
-          setLocationStatus(`📍 ${name}`);
-        }
-      },
-      null,
-      { enableHighAccuracy: true, maximumAge: 10000 }
-    );
-    return () => navigator.geolocation.clearWatch(id);
-  }, [destination]);
+  const setupWorkspace = (center) => {
+    setUserLocation(center);
+    setMapCenter(center);
+    setLights(generateStreetlights(center));
+    setBusinesses(generateBusinesses(center));
+    setRefugeHubs(generateRefugeHubs(center));
+  };
 
-  // ── Fallback when GPS is denied ──────────────────────────────────────────
-  function initFallback() {
-    setUserLocation(FALLBACK);
-    setMapCenter(FALLBACK);
-    setBusinesses(generateBusinesses(FALLBACK));
-    setStartLocation({ name: "Anantapur (default)", lat: FALLBACK[0], lng: FALLBACK[1] });
-    setLocationStatus("⚠️ Location denied — using Anantapur default");
-    fetchLights(FALLBACK);
-  }
-
-  // ── Fetch streetlights from backend ─────────────────────────────────────
-  function fetchLights(center) {
-    fetch(`${API}/api/lights`)
-      .then((res) => res.json())
-      .then((data) => {
-        const offsets = [
-          [0.002,0.001],[0.003,0.003],[-0.001,0.002],[0.004,-0.001],
-          [-0.002,0.003],[0.001,-0.002],[0.003,0.005],[-0.003,-0.001],
-        ];
-        const apiLights = Object.entries(data).map(([nodeId, info], i) => ({
-          id: nodeId,
-          lat: center[0] + offsets[i % offsets.length][0],
-          lng: center[1] + offsets[i % offsets.length][1],
-          status: info.status === "ONLINE" ? "online" : "offline",
-          lux: info.lux,
-        }));
-        setLights(apiLights);
-      })
-      .catch(() => {
-        // backend offline — use simulated lights
-        setLights(generateStreetlights(center));
-      });
-  }
-
-  // ── Night mode toggle ────────────────────────────────────────────────────
-  useEffect(() => {
-    setIsNightMode(temporalHour >= 20 || temporalHour < 6);
-  }, [temporalHour]);
-
-  // ── Show toast notification ──────────────────────────────────────────────
   const showNotification = (msg, type = "info") => {
     setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 3000);
+    setTimeout(() => setNotification(null), 4000);
   };
 
-  // ── Calculate route using backend ────────────────────────────────────────
-  const calculateRoute = useCallback(() => {
+  // Environment-Aware Dynamic Routing System
+  const calculateSafetyRoutes = useCallback(() => {
     if (!startLocation || !destination) return;
-    const mode = isNightMode ? "safer" : "fastest";
 
-    fetch(`${API}/api/route?mode=${mode}`)
-      .then((res) => res.json())
-      .then((data) => {
-        const r = generateRoute(
-          [startLocation.lat, startLocation.lng],
-          [destination.lat,   destination.lng]
-        );
-        setRoute(r);
-        const segments  = data.networkSegments || [];
-        const avgSafety = segments.length
-          ? segments.reduce((sum, s) => sum + Number(s.safety_score), 0) / segments.length
-          : null;
-        const score = avgSafety
-          ? Math.round((avgSafety / 10) * 100)
-          : Math.min(99, (isNightMode ? 55 : 82) + lights.filter((l) => l.status === "online").length * 2);
-        setSafetyScore(score);
-        showNotification(`Route calculated! Safety Score: ${score}%`, "success");
-      })
-      .catch(() => {
-        // backend offline — calculate locally
-        const r = generateRoute(
-          [startLocation.lat, startLocation.lng],
-          [destination.lat,   destination.lng]
-        );
-        setRoute(r);
-        const score = Math.min(99, (isNightMode ? 55 : 82) + lights.filter((l) => l.status === "online").length * 2);
-        setSafetyScore(score);
-        showNotification(`Route calculated! Safety Score: ${score}%`, "success");
-      });
-  }, [startLocation, destination, lights, isNightMode]);
+    const startPt = [startLocation.lat, startLocation.lng];
+    const endPt = [destination.lat, destination.lng];
 
-  useEffect(() => {
-    if (destination) calculateRoute();
-  }, [destination, temporalHour, lights, calculateRoute]);
+    // 1. Generate the Safest Route snapping through Active Lights & Open Shops
+    const safeWaypoints = [startPt];
+    const activeSafeNodes = [
+      ...lights.filter(l => l.status === "online"),
+      ...businesses.filter(b => b.open)
+    ];
 
-  // ── Toggle streetlight + sync to backend ─────────────────────────────────
-  const toggleLight = (id) => {
-    setLights((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const newStatus = l.status === "online" ? "offline" : "online";
-        fetch(`${API}/api/simulator/update`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            node_id:   id,
-            lux_level: newStatus === "online" ? 85 : 0,
-            status:    newStatus === "online" ? "ONLINE" : "OFFLINE",
-          }),
-        }).catch(() => {});
-        return { ...l, status: newStatus };
-      })
-    );
-    showNotification("Streetlight status updated", "info");
-  };
+    activeSafeNodes.sort((a, b) => {
+      const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
+      const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
+      return distA - distB;
+    });
 
-  // ── Map right-click → drop hazard pin ────────────────────────────────────
-  const handleMapClick = (latlng) => {
-    if (!logMode) return;
-    setHazardPins((prev) => [...prev, { lat: latlng.lat, lng: latlng.lng, id: Date.now() }]);
-    showNotification("Hazard pin logged!", "warning");
-    setLogMode(false);
-  };
+    activeSafeNodes.forEach(node => {
+      if (safeWaypoints.length < 5) {
+        safeWaypoints.push([node.lat, node.lng]);
+      }
+    });
+    safeWaypoints.push(endPt);
+    setSafestRoute(safeWaypoints);
 
-  // ── SOS button ───────────────────────────────────────────────────────────
-  const handleSOS = () => {
+    // 2. Generate Danger Route snapping through Broken Lights & High Hazard sectors
+    const dangerWaypoints = [startPt];
+    const highRiskNodes = [
+      ...lights.filter(l => l.status === "offline"),
+      ...hazardPins
+    ];
+
+    highRiskNodes.sort((a, b) => {
+      const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
+      const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
+      return distA - distB;
+    });
+
+    highRiskNodes.forEach(node => {
+      if (dangerWaypoints.length < 4) {
+        dangerWaypoints.push([node.lat, node.lng]);
+      }
+    });
+    
+    if (dangerWaypoints.length === 1) {
+      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0018;
+      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0018;
+      dangerWaypoints.push([midLat, midLng]);
+    }
+    dangerWaypoints.push(endPt);
+    setDangerRoute(dangerWaypoints);
+
+    // Scoring Engine
+    const totalSafeAssetsOnRoute = lights.filter(l => l.status === "online").length;
+    const computedScore = isNightMode 
+      ? Math.min(98, 55 + totalSafeAssetsOnRoute * 4) 
+      : Math.min(99, 92 + totalSafeAssetsOnRoute * 1);
+      
+    setSafetyScore(computedScore);
+    showNotification(`Context route calculated. Safety Factor: ${computedScore}%`, "success");
+  }, [startLocation, destination, lights, hazardPins, isNightMode]);
+
+  useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
+
+  // SOS Emergency Handler
+  const handleSOSPanicDispatch = () => {
+    if (!userLocation || refugeHubs.length === 0) return;
     setSosActive(true);
-    showNotification("🚨 SOS ACTIVATED — Sending location to emergency contacts!", "danger");
-    setTimeout(() => setSosActive(false), 5000);
+
+    let nearestHub = refugeHubs[0];
+    let closestDist = Infinity;
+
+    refugeHubs.forEach(hub => {
+      const dist = Math.sqrt(Math.pow(hub.lat - userLocation[0], 2) + Math.pow(hub.lng - userLocation[1], 2));
+      if (dist < closestDist) {
+        closestDist = dist;
+        nearestHub = hub;
+      }
+    });
+
+    const escapeWaypoints = [
+      userLocation,
+      [(userLocation[0] + nearestHub.lat)/2, (userLocation[1] + nearestHub.lng)/2],
+      [nearestHub.lat, nearestHub.lng]
+    ];
+
+    setSafestRoute(escapeWaypoints);
+    setDangerRoute(null); 
+    setMapCenter([nearestHub.lat, nearestHub.lng]);
+
+    showNotification(
+      `🚨 EMERGENCY: Shared live tracking link to priority contacts ${EMERGENCY_CONTACTS.join(" & ")}. Nearest refuge target safehouse locked: ${nearestHub.name}`,
+      "danger"
+    );
   };
 
-  // ── Companion share link ─────────────────────────────────────────────────
+  const handleMapClick = (latlng) => {
+    if (logMode) {
+      setHazardPins((prev) => [...prev, { lat: latlng.lat, lng: latlng.lng, id: Date.now() }]);
+      showNotification("New danger/broken asset vector logged to local map layer.", "warning");
+      setLogMode(false);
+    }
+  };
+
   const handleShare = () => {
-    const link = `https://shadowpath.vercel.app/share?lat=${startLocation?.lat}&lng=${startLocation?.lng}&dest=${encodeURIComponent(destination?.name || "")}&t=${Date.now()}`;
+    const activeOrigin = window.location.hostname === "localhost" ? window.location.origin : window.location.href.split('?')[0];
+    const link = `${activeOrigin}?lat=${startLocation?.lat}&lng=${startLocation?.lng}&active=true`;
     setShareLink(link);
     navigator.clipboard?.writeText(link);
-    showNotification("Companion share link copied!", "success");
+    showNotification("Dynamic companion sync link updated & copied to clipboard!", "success");
   };
 
-  // ── Time display string ──────────────────────────────────────────────────
   const timeString = (() => {
-    const h    = temporalHour % 24;
+    const h = temporalHour % 24;
     const ampm = h >= 12 ? "PM" : "AM";
-    const h12  = h % 12 || 12;
-    return `${h12}:00 ${ampm}`;
+    const h12 = h % 12 || 12;
+    const mins = String(temporalMinute).padStart(2, "0");
+    return `${h12}:${mins} ${ampm}`;
   })();
 
-  const routeColor       = isNightMode ? "#c084fc" : "#818cf8";
-  const onlineLightsCount = lights.filter((l) => l.status === "online").length;
-
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={styles.app}>
-
-      {/* Toast notification */}
-      {notification && (
-        <div style={{ ...styles.toast, borderColor: toastColors[notification.type], animation: "slideIn 0.3s ease" }}>
-          {notification.msg}
-        </div>
-      )}
-
-      {/* Night overlay */}
+      {notification && <div style={{ ...styles.toast, borderColor: toastColors[notification.type] }}>{notification.msg}</div>}
       {isNightMode && <div style={styles.nightOverlay} />}
 
-      {/* ── MAP ── */}
+      {/* RENDER SPACE BASE LAYER */}
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={15} style={{ width: "100%", height: "100%" }} zoomControl={false}>
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; OpenStreetMap &copy; CARTO'
-          />
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
           <MapRecenter center={mapCenter} />
           <MapClickHandler onMapClick={handleMapClick} />
 
-          {/* Start marker */}
-          {startLocation && (
-            <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)}>
-              <Popup>📍 {startLocation.name}</Popup>
-            </Marker>
-          )}
+          {startLocation && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
+          {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* Destination marker */}
-          {destination && (
-            <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)}>
-              <Popup>🏁 {destination.name}</Popup>
-            </Marker>
-          )}
+          {/* DUAL TRAJECTORY PATH OVERLAYS */}
+          {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 5, opacity: 0.95 }} />}
+          {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
-          {/* Route polyline */}
-          {route && (
-            <Polyline
-              positions={route}
-              pathOptions={{ color: routeColor, weight: 4, opacity: 0.9, dashArray: isNightMode ? "8,4" : undefined }}
-            />
-          )}
+          {/* Environmental Streetlight Nodes with Adaptive Illumination Radials */}
+          {lights.map((l) => (
+            <div key={l.id}>
+              <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
+              {l.status === "online" && isNightMode && (
+                <Circle center={[l.lat, l.lng]} radius={45} pathOptions={{ color: "#f59e0b", fillColor: "#f59e0b", fillOpacity: 0.08, weight: 1 }} />
+              )}
+            </div>
+          ))}
 
-          {/* Streetlights */}
-          {lights.map((light) => (
-            <Marker
-              key={light.id}
-              position={[light.lat, light.lng]}
-              icon={light.status === "online" ? streetlightIcon : brokenLightIcon}
-              eventHandlers={{ click: () => toggleLight(light.id) }}
-            >
-              <Popup>
-                {light.status === "online" ? "✅ Working Streetlight" : "❌ Broken Light"}
-                {light.lux !== undefined && <><br /><small style={{ color: "#9ca3af" }}>Lux: {light.lux}</small></>}
-                <br /><small style={{ color: "#6366f1" }}>Click to toggle status</small>
-              </Popup>
+          {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
+          {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
+
+          {/* SAFETY REFUGE HUBS MAP NODES */}
+          {refugeHubs.map((hub) => (
+            <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}>
+              <Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup>
             </Marker>
           ))}
 
-          {/* Businesses */}
-          {businesses.map((biz) => (
-            <Marker key={biz.id} position={[biz.lat, biz.lng]} icon={shopIcon}>
-              <Popup>{biz.open ? "🟢 Active" : "🔴 Closed"} — {biz.name}</Popup>
-            </Marker>
-          ))}
-
-          {/* Hazard pins */}
-          {hazardPins.map((pin) => (
-            <Marker key={pin.id} position={[pin.lat, pin.lng]} icon={hazardIcon}>
-              <Popup>⚠️ Community Hazard Report</Popup>
-            </Marker>
-          ))}
-
-          {/* SOS pulse circle */}
           {sosActive && startLocation && (
-            <Circle
-              center={[startLocation.lat, startLocation.lng]}
-              radius={300}
-              pathOptions={{ color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.15, weight: 2 }}
-            />
+            <Circle center={[startLocation.lat, startLocation.lng]} radius={280} pathOptions={{ color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.15 }} />
           )}
         </MapContainer>
       </div>
 
-      {/* ── HUD PANEL ── */}
-      <div style={styles.hud}>
-
-        {/* Header */}
+      {/* HUD SYSTEM FOREGROUND CONSOLE */}
+      <div className="hud-scrollbar" style={styles.hud}>
         <div style={styles.header}>
           <div style={styles.logoBox}><span style={{ fontSize: 22 }}>🛡️</span></div>
           <div>
             <div style={styles.appName}>ShadowPath</div>
-            <div style={styles.appSub}>Safe pedestrian routing engine</div>
+            <div style={styles.appSub}>Context-Aware Navigation Framework</div>
           </div>
         </div>
 
-        {/* Live location status */}
         <div style={styles.locationStatusBox}>
-          <span style={{ fontSize: 11, color: "#94a3b8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {locationStatus}
-          </span>
+          <span style={{ fontSize: 10 }}>📡</span>
+          <span style={{ fontSize: 10, color: "#94a3b8", textOverflow: "ellipsis", whiteSpace: "nowrap", overflow: "hidden" }}>{locationStatus}</span>
         </div>
 
-        {/* Safety Score */}
         {safetyScore !== null && (
           <div style={styles.scoreBar}>
-            <span style={styles.scoreLabel}>SAFETY SCORE</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={styles.scoreTrack}>
-                <div style={{
-                  ...styles.scoreFill,
-                  width: `${safetyScore}%`,
-                  background: safetyScore >= 80 ? "#10b981" : safetyScore >= 60 ? "#f59e0b" : "#ef4444",
-                }} />
-              </div>
-              <span style={{
-                ...styles.scoreBadge,
-                background: safetyScore >= 80 ? "#10b981" : safetyScore >= 60 ? "#f59e0b" : "#ef4444",
-              }}>
-                {safetyScore}%
-              </span>
-            </div>
+            <span style={styles.scoreLabel}>SAFETY SCORING GRID</span>
+            <span style={{ ...styles.scoreBadge, background: safetyScore >= 75 ? "#10b981" : "#f59e0b" }}>{safetyScore}% Safe</span>
           </div>
         )}
 
-        {/* Share button */}
-        <button style={styles.shareBtn} onClick={handleShare}>
-          <span style={{ marginRight: 6 }}>🔗</span> Generate Companion Share Link
-        </button>
-        {shareLink && (
-          <div style={styles.shareLink}>
-            {shareLink.slice(0, 52)}...
-          </div>
-        )}
+        <button style={styles.shareBtn} onClick={handleShare}>🔗 Generate Companion Share Link</button>
+        {shareLink && <div style={styles.shareLink}>{shareLink}</div>}
 
-        {/* Temporal Sync */}
         <div style={styles.temporalBox}>
           <div style={styles.temporalHeader}>
             <span style={styles.temporalLabel}>⏱ TEMPORAL SYNC</span>
@@ -621,143 +490,90 @@ export default function App() {
           </div>
           <input
             type="range" min={0} max={23} value={temporalHour}
-            onChange={(e) => setTemporalHour(Number(e.target.value))}
+            onChange={(e) => { setTemporalHour(Number(e.target.value)); setTemporalMinute(new Date().getMinutes()); }}
             style={styles.slider}
           />
-          <div style={styles.sliderLabels}>
-            <span>12AM</span><span>6AM</span><span>12PM</span><span>6PM</span><span>11PM</span>
-          </div>
-          {isNightMode && (
-            <div style={styles.nightBadge}>🌙 Night Mode — Route optimised for safety</div>
-          )}
+          <div style={styles.sliderLabels}><span>12AM</span><span>6AM</span><span>12PM</span><span>6PM</span><span>11PM</span></div>
+          {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
         </div>
 
-        {/* SOS Button */}
-        <button
-          style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }}
-          onClick={handleSOS}
-        >
-          <span style={{ marginRight: 6 }}>🚨</span>
-          {sosActive ? "SOS ACTIVATED — LOCATING HELP..." : "🛡 ACTIVATE SOS PANIC REFUGE"}
+        {/* SOS BUTTON ACTUATOR */}
+        <button style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }} onClick={handleSOSPanicDispatch}>
+          🚨 {sosActive ? "SOS EMERGENCY ACCELERATED..." : "🛡️ ACTIVATE SOS PANIC REFUGE"}
         </button>
 
-        {/* Log Hazard */}
-        <button
-          style={{ ...styles.logBtn, ...(logMode ? { borderColor: "#f59e0b", color: "#f59e0b" } : {}) }}
-          onClick={() => {
-            setLogMode(!logMode);
-            if (!logMode) showNotification("Right-click on the map to place a hazard pin", "warning");
-          }}
-        >
-          <span style={{ marginRight: 6 }}>⚠️</span>
-          {logMode ? "Click on map to place pin..." : "+ Log New Broken Light / Hazard"}
+        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click inside map grid frame to commit hazard coordinate labels.", "warning"); }}>
+          ⚠️ {logMode ? "Click target location coordinate point..." : "+ Log Broken Light / Hazard Area"}
         </button>
 
-        {/* Route Inputs */}
         <div style={styles.routeSection}>
           <div style={styles.inputLabel}>START POINT</div>
-          <LocationSelector
-            label="START POINT"
-            value={startLocation?.name || ""}
-            onChange={setStartLocation}
-            userLocation={userLocation || FALLBACK}
-          />
+          <LocationSelector label="START POINT" value={startLocation?.name || ""} onChange={setStartLocation} userLocation={userLocation || FALLBACK_CENTER} gpsDetecting={gpsDetecting} />
+          
           <div style={{ ...styles.inputLabel, marginTop: 10 }}>DESTINATION</div>
-          <LocationSelector
-            label="DESTINATION"
-            value={destination?.name || ""}
-            onChange={setDestination}
-            userLocation={userLocation || FALLBACK}
-          />
+          <LocationSelector label="DESTINATION" value={destination?.name || ""} onChange={setDestination} userLocation={userLocation || FALLBACK_CENTER} />
         </div>
 
-        {/* Stats row */}
+        {/* SUMMARY COUNTERS */}
         <div style={styles.statsRow}>
-          <div style={styles.statBox}>
-            <div style={{ fontSize: 18 }}>💡</div>
-            <div style={styles.statNum}>{onlineLightsCount}</div>
-            <div style={styles.statLabel}>Lights On</div>
-          </div>
-          <div style={styles.statBox}>
-            <div style={{ fontSize: 18 }}>🏪</div>
-            <div style={styles.statNum}>{businesses.filter((b) => b.open).length}</div>
-            <div style={styles.statLabel}>Open Shops</div>
-          </div>
-          <div style={styles.statBox}>
-            <div style={{ fontSize: 18 }}>⚠️</div>
-            <div style={styles.statNum}>{hazardPins.length}</div>
-            <div style={styles.statLabel}>Hazards</div>
-          </div>
+          <div style={styles.statBox}><div style={{ fontSize: 16 }}>💡</div><div style={styles.statNum}>{lights.filter(l => l.status === "online").length}</div><div style={styles.statLabel}>Active Lights</div></div>
+          <div style={styles.statBox}><div style={{ fontSize: 16 }}>🏪</div><div style={styles.statNum}>{businesses.filter(b => b.open).length}</div><div style={styles.statLabel}>Open Safe Hubs</div></div>
+          <div style={styles.statBox}><div style={{ fontSize: 16 }}>⚠️</div><div style={styles.statNum}>{hazardPins.length}</div><div style={styles.statLabel}>Hazards</div></div>
         </div>
 
-        {/* Legend */}
+        {/* INFRASTRUCTURE LEGEND */}
         <div style={styles.legendBox}>
           <div style={styles.legendTitle}>INFRASTRUCTURE MAP SIGNS</div>
-          <div style={styles.legendItem}><span style={{ fontSize: 16 }}>💡</span><span>Amber Bulb: <strong>Working Streetlight Grid</strong></span></div>
-          <div style={styles.legendItem}><span style={{ fontSize: 16 }}>🏪</span><span>Green Shop: <strong>Active Working Business Area</strong></span></div>
-          <div style={styles.legendItem}><span style={{ fontSize: 16 }}>⚠️</span><span>Red Triangle: <strong>Non-Working / Broken Roads</strong></span></div>
-          <div style={styles.legendItem}><span style={{ fontSize: 16 }}>🔦</span><span style={{ color: "#9ca3af" }}>Dim Torch: <strong>Offline / Broken Light</strong></span></div>
+          <div style={styles.legendItem}>🟢 <span style={{ color: "#10b981", fontWeight: 'bold' }}>Safest Route Vector Track (Lit)</span></div>
+          <div style={styles.legendItem}>🔴 <span style={{ color: "#ef4444", fontWeight: 'bold' }}>Unlit High Risk Shortcut Track</span></div>
+          <div style={styles.legendItem}>💡 <span>Amber Bulbs: <strong>Active Streetlight Aura</strong></span></div>
+          <div style={styles.legendItem}>🚓 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
         </div>
 
-        {/* Footer */}
-        <div style={styles.footer}>
-          <span>Right-click map to pin hazards</span>
-          <span style={{ color: "#4f46e5" }}>ShadowPath v1.0</span>
-        </div>
+        <div style={styles.footer}><span>Right-click map frame to submit tags</span><span style={{ color: "#4f46e5" }}>ShadowPath v1.0</span></div>
       </div>
     </div>
   );
 }
 
-// ─── TOAST COLORS ─────────────────────────────────────────────────────────────
-const toastColors = {
-  info:    "#60a5fa",
-  success: "#10b981",
-  warning: "#f59e0b",
-  danger:  "#ef4444",
-};
-
-// ─── ALL STYLES ───────────────────────────────────────────────────────────────
+const toastColors = { info: "#60a5fa", success: "#10b981", warning: "#f59e0b", danger: "#ef4444" };
 const styles = {
-  app:             { position: "relative", width: "100vw", height: "100vh", background: "#0a0e1a", fontFamily: "'DM Sans','Segoe UI',sans-serif", overflow: "hidden" },
-  mapContainer:    { position: "absolute", inset: 0, zIndex: 0 },
-  nightOverlay:    { position: "absolute", inset: 0, background: "rgba(0,0,20,0.4)", zIndex: 1, pointerEvents: "none", animation: "nightFade 1s ease" },
-  hud:             { position: "absolute", top: 12, left: 12, bottom: 12, width: 340, zIndex: 10, background: "rgba(10,14,30,0.93)", backdropFilter: "blur(18px)", borderRadius: 16, border: "1px solid rgba(99,102,241,0.25)", padding: "14px 14px 10px", display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", overflowX: "hidden", boxShadow: "0 0 40px rgba(79,70,229,0.15),inset 0 1px 0 rgba(255,255,255,0.05)", scrollbarWidth: "thin", scrollbarColor: "rgba(99,102,241,0.3) transparent" },
-  header:          { display: "flex", alignItems: "center", gap: 10, paddingBottom: 8, borderBottom: "1px solid rgba(99,102,241,0.2)" },
-  logoBox:         { width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#1e3a5f,#312e81)", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(99,102,241,0.4)", flexShrink: 0 },
-  appName:         { color: "#e0e7ff", fontSize: 20, fontWeight: 700, letterSpacing: "-0.5px" },
-  appSub:          { color: "#6b7280", fontSize: 11 },
-  locationStatusBox: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.6)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8, padding: "5px 10px" },
-  scoreBar:        { display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "7px 12px" },
-  scoreLabel:      { color: "#9ca3af", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em" },
-  scoreTrack:      { width: 60, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.1)", overflow: "hidden" },
-  scoreFill:       { height: "100%", borderRadius: 2, transition: "width 0.5s ease" },
-  scoreBadge:      { padding: "2px 8px", borderRadius: 20, color: "#fff", fontSize: 12, fontWeight: 700 },
-  shareBtn:        { background: "rgba(30,58,138,0.6)", border: "1px solid rgba(99,102,241,0.35)", borderRadius: 10, color: "#93c5fd", padding: "9px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "center" },
-  shareLink:       { background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 6, padding: "5px 8px", color: "#a5b4fc", fontSize: 10, wordBreak: "break-all" },
-  temporalBox:     { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, padding: "10px 12px" },
-  temporalHeader:  { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  temporalLabel:   { color: "#9ca3af", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em" },
-  slider:          { width: "100%", accentColor: "#6366f1", cursor: "pointer" },
-  sliderLabels:    { display: "flex", justifyContent: "space-between", color: "#4b5563", fontSize: 9, marginTop: 4 },
-  nightBadge:      { marginTop: 6, background: "rgba(109,40,217,0.2)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 6, padding: "4px 8px", color: "#c084fc", fontSize: 10, textAlign: "center" },
-  sosBtn:          { background: "linear-gradient(135deg,#dc2626,#f97316)", border: "none", borderRadius: 10, color: "#fff", padding: "12px 14px", cursor: "pointer", fontSize: 13, fontWeight: 800, letterSpacing: "0.06em", textAlign: "center", textTransform: "uppercase", boxShadow: "0 4px 20px rgba(239,68,68,0.35)", transition: "all 0.2s" },
-  sosBtnActive:    { animation: "pulse 0.5s infinite alternate", background: "linear-gradient(135deg,#7f1d1d,#dc2626)", boxShadow: "0 0 30px rgba(239,68,68,0.7)" },
-  logBtn:          { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, color: "#d1d5db", padding: "9px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600, textAlign: "center", transition: "all 0.2s" },
-  routeSection:    { background: "rgba(15,23,42,0.7)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, padding: "10px 12px" },
-  inputLabel:      { color: "#9ca3af", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", marginBottom: 5 },
-  inputRow:        { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.8)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, padding: "6px 10px" },
-  locationInput:   { flex: 1, background: "transparent", border: "none", color: "#e0e7ff", fontSize: 12, outline: "none", minWidth: 0 },
-  gpsBtn:          { background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: 0, flexShrink: 0 },
-  dropdown:        { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "rgba(10,14,30,0.98)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, zIndex: 9999, maxHeight: 180, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.7)" },
-  dropdownItem:    { padding: "8px 12px", color: "#cbd5e1", fontSize: 12, cursor: "pointer", transition: "background 0.15s", display: "flex", alignItems: "flex-start" },
-  statsRow:        { display: "flex", gap: 6 },
-  statBox:         { flex: 1, background: "rgba(15,23,42,0.7)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8, padding: "8px 4px", textAlign: "center" },
-  statNum:         { color: "#e0e7ff", fontSize: 18, fontWeight: 700, lineHeight: 1.2 },
-  statLabel:       { color: "#6b7280", fontSize: 9, marginTop: 2 },
-  legendBox:       { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 10, padding: "10px 12px" },
-  legendTitle:     { color: "#9ca3af", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", marginBottom: 8 },
-  legendItem:      { display: "flex", alignItems: "center", gap: 8, color: "#d1d5db", fontSize: 11, marginBottom: 5 },
-  footer:          { display: "flex", justifyContent: "space-between", color: "#4b5563", fontSize: 9, paddingTop: 4, borderTop: "1px solid rgba(99,102,241,0.1)", marginTop: "auto" },
-  toast:           { position: "fixed", top: 16, right: 16, zIndex: 9999, background: "rgba(10,14,30,0.96)", border: "1px solid", borderRadius: 10, padding: "10px 16px", color: "#e0e7ff", fontSize: 12, fontWeight: 600, backdropFilter: "blur(12px)", boxShadow: "0 4px 20px rgba(0,0,0,0.5)", maxWidth: 300 },
+  app: { position: "relative", width: "100vw", height: "100vh", background: "#0a0e1a", fontFamily: "sans-serif", overflow: "hidden" },
+  mapContainer: { position: "absolute", inset: 0, zIndex: 0 },
+  nightOverlay: { position: "absolute", inset: 0, background: "rgba(10,14,40,0.35)", zIndex: 1, pointerEvents: "none" },
+  hud: { position: "absolute", top: 12, left: 12, bottom: 12, width: 340, zIndex: 10, background: "rgba(10,14,30,0.94)", backdropFilter: "blur(16px)", borderRadius: 16, border: "1px solid rgba(99,102,241,0.25)", padding: "14px", display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", overflowX: "hidden", boxShadow: "0 0 30px rgba(0,0,0,0.5)" },
+  header: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 6, borderBottom: "1px solid rgba(99,102,241,0.2)" },
+  logoBox: { width: 38, height: 38, borderRadius: 8, background: "linear-gradient(135deg,#1e3a5f,#312e81)", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(99,102,241,0.3)" },
+  appName: { color: "#e0e7ff", fontSize: 19, fontWeight: 700 },
+  appSub: { color: "#6b7280", fontSize: 10 },
+  locationStatusBox: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.5)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8, padding: "5px 10px" },
+  scoreBar: { display: "flex", alignItems: "center", "justifyContent": "space-between", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "6px 12px" },
+  scoreLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
+  scoreBadge: { padding: "3px 10px", borderRadius: 20, color: "#fff", fontSize: 11, fontWeight: 700 },
+  shareBtn: { background: "rgba(30,58,138,0.5)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600, textStyle: "center" },
+  shareLink: { background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 6, padding: "6px", color: "#a5b4fc", fontSize: 9, wordBreak: "break-all" },
+  temporalBox: { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 10, padding: "10px" },
+  temporalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  temporalLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
+  slider: { width: "100%", accentColor: "#6366f1", cursor: "pointer" },
+  sliderLabels: { display: "flex", justifyContent: "space-between", color: "#4b5563", fontSize: 9, marginTop: 2 },
+  nightBadge: { marginTop: 6, background: "rgba(109,40,217,0.15)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 6, padding: "4px", color: "#c084fc", fontSize: 10, textAlign: "center" },
+  sosBtn: { background: "linear-gradient(135deg,#dc2626,#f97316)", border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 12, fontWeight: 800, textTransform: "uppercase", boxShadow: "0 4px 15px rgba(239,68,68,0.3)" },
+  sosBtnActive: { background: "linear-gradient(135deg,#7f1d1d,#dc2626)", boxShadow: "0 0 20px rgba(239,68,68,0.6)" },
+  logBtn: { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, color: "#d1d5db", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600 },
+  routeSection: { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 10, padding: "10px" },
+  inputLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700, marginBottom: 4 },
+  inputRow: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.7)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, padding: "6px" },
+  locationInput: { flex: 1, background: "transparent", border: "none", color: "#e0e7ff", fontSize: 12, outline: "none" },
+  dropdown: { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "rgba(10,14,30,0.98)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, zIndex: 9999, maxHeight: 150, overflowY: "auto" },
+  dropdownItem: { padding: "6px 10px", color: "#cbd5e1", fontSize: 12, cursor: "pointer" },
+  statsRow: { display: "flex", gap: 4 },
+  statBox: { flex: 1, background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99, 102, 241, 0.12)", borderRadius: 8, padding: "6px 2px", textAlign: "center" },
+  statNum: { color: "#e0e7ff", fontSize: 16, fontWeight: 700 },
+  statLabel: { color: "#6b7280", fontSize: 8, marginTop: 1 },
+  legendBox: { background: "rgba(15,23,42,0.5)", border: "1px solid rgba(99, 102, 241, 0.12)", borderRadius: 8, padding: "10px" },
+  legendTitle: { color: "#9ca3af", fontSize: 9, fontWeight: 700, marginBottom: 6 },
+  legendItem: { display: "flex", alignItems: "center", gap: 6, color: "#d1d5db", fontSize: 11, marginBottom: 4 },
+  footer: { display: "flex", justifyContent: "space-between", color: "#4b5563", fontSize: 9, paddingTop: 4, borderTop: "1px solid rgba(99,102,241,0.1)", marginTop: "auto" },
+  toast: { position: "fixed", top: 16, right: 16, zIndex: 9999, background: "rgba(10,14,30,0.95)", border: "1px solid", borderRadius: 8, padding: "10px", color: "#e0e7ff", fontSize: 12, fontWeight: 600, maxWidth: 280 },
 };

@@ -1,42 +1,28 @@
-/* =========================================================================
-   TAILWIND CSS DIRECTIVES (Vite-Compatible Production Format)
-   ========================================================================= */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @import "leaflet/dist/leaflet.css";
 
-/* =========================================================================
-   GLOBAL RESET LAYOUTS
-   ========================================================================= */
 html, body, #root {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  background-color: #030712; /* Tailwind gray-950 deep base theme */
+  background-color: #030712;
   overflow: hidden;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 }
 
-/* =========================================================================
-   CUSTOM LEAFLET MAP INNER ELEMENT OVERRIDES
-   ========================================================================= */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  background-color: #111827 !important; /* Prevents white canvas flash during tile updates */
+  background-color: #111827 !important;
 }
 
-/* Smooth zoom transition animations on map vector updates */
 .leaflet-zoom-animated {
   transition: transform 0.25s cubic-bezier(0, 0, 0.2, 1);
 }
 
-/* =========================================================================
-   CUSTOM UTILITY EFFECTS (For ShadowPath Overlay Elements)
-   ========================================================================= */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -52,7 +38,6 @@ html, body, #root {
   animation: fadeIn 0.2s ease-out forwards;
 }
 
-/* Custom styles to make scrollbars inside the search results dropdown look sleek */
 ::-webkit-scrollbar {
   width: 6px;
 }

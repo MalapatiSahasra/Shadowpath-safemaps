@@ -55,12 +55,12 @@ const emergencyRefugeIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
-// Simulated infrastructure data around user position
+// Simulated infrastructure layout nodes around user space position
 function generateStreetlights(center) {
   const offsets = [
-    [0.0015, 0.0010], [0.0028, 0.0025], [-0.0008, 0.0018],
-    [0.0035, -0.0008], [-0.0015, 0.0022], [0.0008, -0.0015],
-    [0.0025, 0.0042], [-0.0022, -0.0008], [0.0042, 0.0015], [-0.0008, 0.0035],
+    [0.0012, 0.0008], [0.0022, 0.0019], [-0.0006, 0.0014],
+    [0.0031, -0.0005], [-0.0014, 0.0020], [0.0007, -0.0012],
+    [0.0021, 0.0038], [-0.0019, -0.0006], [0.0038, 0.0012], [-0.0006, 0.0031],
   ];
   return offsets.map((o, i) => ({
     id: i + 1,
@@ -72,11 +72,11 @@ function generateStreetlights(center) {
 
 function generateBusinesses(center) {
   const places = [
-    { offset: [0.0022, 0.0015], name: "Local Market Square", open: true },
-    { offset: [-0.0012, 0.0032], name: "Emergency Pharmacy 24/7", open: true },
-    { offset: [0.0040, -0.0005], name: "Central Food Court", open: false },
-    { offset: [-0.0005, -0.0022], name: "Convenience Store Hub", open: true },
-    { offset: [0.0032, 0.0040], name: "Highway Tea Junction", open: true },
+    { offset: [0.0018, 0.0012], name: "Local Market Square", open: true },
+    { offset: [-0.0010, 0.0028], name: "Emergency Pharmacy 24/7", open: true },
+    { offset: [0.0035, -0.0003], name: "Central Food Court", open: false },
+    { offset: [-0.0003, -0.0019], name: "Convenience Store Hub", open: true },
+    { offset: [0.0028, 0.0035], name: "Highway Tea Junction", open: true },
   ];
   return places.map((p, i) => ({
     id: i + 1,
@@ -94,7 +94,6 @@ function generateRefugeHubs(center) {
   ];
 }
 
-// Map Component Helpers
 function MapRecenter({ center }) {
   const map = useMap();
   useEffect(() => { if (center) map.setView(center, map.getZoom()); }, [center, map]);
@@ -106,7 +105,6 @@ function MapClickHandler({ onMapClick }) {
   return null;
 }
 
-// Nominatim Geocoding Wrappers
 async function searchNearbyPlaces(lat, lng, query = "") {
   try {
     const viewbox = `${lng - 0.05},${lat - 0.05},${lng + 0.05},${lat + 0.05}`;
@@ -133,7 +131,6 @@ async function reverseGeocode(lat, lng) {
   } catch { return `${lat.toFixed(4)}, ${lng.toFixed(4)}`; }
 }
 
-// Location Selector Component
 function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value || "");
@@ -237,7 +234,6 @@ export default function App() {
   const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
   const [isNightMode,    setIsNightMode]    = useState(false);
 
-  // Synchronized Clock Ticker
   useEffect(() => {
     const tick = () => {
       const now = new Date();
@@ -252,7 +248,6 @@ export default function App() {
     setIsNightMode(temporalHour >= 19 || temporalHour < 6);
   }, [temporalHour]);
 
-  // GPS Initialization Mount
   useEffect(() => {
     if (!navigator.geolocation) {
       setupWorkspace(FALLBACK_CENTER);
@@ -290,35 +285,37 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Environment-Aware Dynamic Routing System
+  // INFRASTRUCTURE-LOCKED DIRECT SNAP ROUTING PIPELINE
   const calculateSafetyRoutes = useCallback(() => {
     if (!startLocation || !destination) return;
 
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
 
-    // 1. Generate the Safest Route snapping through Active Lights & Open Shops
+    // 1. Building Safest Path: Snap strictly directly onto Working Streetlights & Open Safe Hubs
     const safeWaypoints = [startPt];
     const activeSafeNodes = [
       ...lights.filter(l => l.status === "online"),
       ...businesses.filter(b => b.open)
     ];
 
+    // Proximity sorting loop vector matching trajectory coordinates
     activeSafeNodes.sort((a, b) => {
       const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
       const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
       return distA - distB;
     });
 
+    // Snap path coordinates exactly onto physical light locations
     activeSafeNodes.forEach(node => {
-      if (safeWaypoints.length < 5) {
+      if (safeWaypoints.length < 6) {
         safeWaypoints.push([node.lat, node.lng]);
       }
     });
     safeWaypoints.push(endPt);
     setSafestRoute(safeWaypoints);
 
-    // 2. Generate Danger Route snapping through Broken Lights & High Hazard sectors
+    // 2. Building Danger Path: Snap through unlit sectors, broken torches and recorded hazards
     const dangerWaypoints = [startPt];
     const highRiskNodes = [
       ...lights.filter(l => l.status === "offline"),
@@ -332,32 +329,30 @@ export default function App() {
     });
 
     highRiskNodes.forEach(node => {
-      if (dangerWaypoints.length < 4) {
+      if (dangerWaypoints.length < 5) {
         dangerWaypoints.push([node.lat, node.lng]);
       }
     });
     
     if (dangerWaypoints.length === 1) {
-      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0018;
-      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0018;
+      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0016;
+      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0016;
       dangerWaypoints.push([midLat, midLng]);
     }
     dangerWaypoints.push(endPt);
     setDangerRoute(dangerWaypoints);
 
-    // Scoring Engine
     const totalSafeAssetsOnRoute = lights.filter(l => l.status === "online").length;
     const computedScore = isNightMode 
       ? Math.min(98, 55 + totalSafeAssetsOnRoute * 4) 
       : Math.min(99, 92 + totalSafeAssetsOnRoute * 1);
       
     setSafetyScore(computedScore);
-    showNotification(`Context route calculated. Safety Factor: ${computedScore}%`, "success");
+    showNotification(`Illumination tracking loaded. Safety Factor: ${computedScore}%`, "success");
   }, [startLocation, destination, lights, hazardPins, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
 
-  // SOS Emergency Handler
   const handleSOSPanicDispatch = () => {
     if (!userLocation || refugeHubs.length === 0) return;
     setSosActive(true);
@@ -384,7 +379,7 @@ export default function App() {
     setMapCenter([nearestHub.lat, nearestHub.lng]);
 
     showNotification(
-      `🚨 EMERGENCY: Shared live tracking link to priority contacts ${EMERGENCY_CONTACTS.join(" & ")}. Nearest refuge target safehouse locked: ${nearestHub.name}`,
+      `🚨 EMERGENCY: Transmitted tracking link to contacts ${EMERGENCY_CONTACTS.join(" & ")}. Locked refuge center: ${nearestHub.name}`,
       "danger"
     );
   };
@@ -392,7 +387,7 @@ export default function App() {
   const handleMapClick = (latlng) => {
     if (logMode) {
       setHazardPins((prev) => [...prev, { lat: latlng.lat, lng: latlng.lng, id: Date.now() }]);
-      showNotification("New danger/broken asset vector logged to local map layer.", "warning");
+      showNotification("Environmental hazard pin dropped inside localized zone.", "warning");
       setLogMode(false);
     }
   };
@@ -402,7 +397,7 @@ export default function App() {
     const link = `${activeOrigin}?lat=${startLocation?.lat}&lng=${startLocation?.lng}&active=true`;
     setShareLink(link);
     navigator.clipboard?.writeText(link);
-    showNotification("Dynamic companion sync link updated & copied to clipboard!", "success");
+    showNotification("Dynamic navigation sharing vector copied successfully!", "success");
   };
 
   const timeString = (() => {
@@ -418,7 +413,7 @@ export default function App() {
       {notification && <div style={{ ...styles.toast, borderColor: toastColors[notification.type] }}>{notification.msg}</div>}
       {isNightMode && <div style={styles.nightOverlay} />}
 
-      {/* RENDER SPACE BASE LAYER */}
+      {/* RENDER SPACE BASE LAYER MAP CONTAINER UNDERLAY */}
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={15} style={{ width: "100%", height: "100%" }} zoomControl={false}>
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
@@ -428,11 +423,11 @@ export default function App() {
           {startLocation && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* DUAL TRAJECTORY PATH OVERLAYS */}
+          {/* DUAL PATHWAY GEOMETRIC COGNITIVE OVERLAYS */}
           {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 5, opacity: 0.95 }} />}
           {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
-          {/* Environmental Streetlight Nodes with Adaptive Illumination Radials */}
+          {/* Working streetlights with custom glowing auras tracking directly on the route */}
           {lights.map((l) => (
             <div key={l.id}>
               <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
@@ -445,7 +440,7 @@ export default function App() {
           {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
           {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
 
-          {/* SAFETY REFUGE HUBS MAP NODES */}
+          {/* DISPATCH EMERGENCY REFUGE HUBS */}
           {refugeHubs.map((hub) => (
             <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}>
               <Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup>
@@ -458,7 +453,7 @@ export default function App() {
         </MapContainer>
       </div>
 
-      {/* HUD SYSTEM FOREGROUND CONSOLE */}
+      {/* DASHBOARD CONSOLE INTERFACE FOREGROUND PANEL HUD */}
       <div className="hud-scrollbar" style={styles.hud}>
         <div style={styles.header}>
           <div style={styles.logoBox}><span style={{ fontSize: 22 }}>🛡️</span></div>
@@ -497,13 +492,13 @@ export default function App() {
           {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
         </div>
 
-        {/* SOS BUTTON ACTUATOR */}
+        {/* SOS INTERRUPT EMERGENCY HUB SYSTEM TRIGGER BUTTON */}
         <button style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }} onClick={handleSOSPanicDispatch}>
           🚨 {sosActive ? "SOS EMERGENCY ACCELERATED..." : "🛡️ ACTIVATE SOS PANIC REFUGE"}
         </button>
 
-        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click inside map grid frame to commit hazard coordinate labels.", "warning"); }}>
-          ⚠️ {logMode ? "Click target location coordinate point..." : "+ Log Broken Light / Hazard Area"}
+        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click inside map grid layout to log hazard coordinates.", "warning"); }}>
+          ⚠️ {logMode ? "Click target point inside map frame..." : "+ Log Broken Light / Hazard Area"}
         </button>
 
         <div style={styles.routeSection}>
@@ -514,20 +509,18 @@ export default function App() {
           <LocationSelector label="DESTINATION" value={destination?.name || ""} onChange={setDestination} userLocation={userLocation || FALLBACK_CENTER} />
         </div>
 
-        {/* SUMMARY COUNTERS */}
         <div style={styles.statsRow}>
           <div style={styles.statBox}><div style={{ fontSize: 16 }}>💡</div><div style={styles.statNum}>{lights.filter(l => l.status === "online").length}</div><div style={styles.statLabel}>Active Lights</div></div>
           <div style={styles.statBox}><div style={{ fontSize: 16 }}>🏪</div><div style={styles.statNum}>{businesses.filter(b => b.open).length}</div><div style={styles.statLabel}>Open Safe Hubs</div></div>
           <div style={styles.statBox}><div style={{ fontSize: 16 }}>⚠️</div><div style={styles.statNum}>{hazardPins.length}</div><div style={styles.statLabel}>Hazards</div></div>
         </div>
 
-        {/* INFRASTRUCTURE LEGEND */}
         <div style={styles.legendBox}>
           <div style={styles.legendTitle}>INFRASTRUCTURE MAP SIGNS</div>
           <div style={styles.legendItem}>🟢 <span style={{ color: "#10b981", fontWeight: 'bold' }}>Safest Route Vector Track (Lit)</span></div>
           <div style={styles.legendItem}>🔴 <span style={{ color: "#ef4444", fontWeight: 'bold' }}>Unlit High Risk Shortcut Track</span></div>
           <div style={styles.legendItem}>💡 <span>Amber Bulbs: <strong>Active Streetlight Aura</strong></span></div>
-          <div style={styles.legendItem}>🚓 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
+          <div style={styles.legendItem}>栽培 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
         </div>
 
         <div style={styles.footer}><span>Right-click map frame to submit tags</span><span style={{ color: "#4f46e5" }}>ShadowPath v1.0</span></div>
@@ -547,7 +540,7 @@ const styles = {
   appName: { color: "#e0e7ff", fontSize: 19, fontWeight: 700 },
   appSub: { color: "#6b7280", fontSize: 10 },
   locationStatusBox: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.5)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8, padding: "5px 10px" },
-  scoreBar: { display: "flex", alignItems: "center", "justifyContent": "space-between", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "6px 12px" },
+  scoreBar: { display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "6px 12px" },
   scoreLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
   scoreBadge: { padding: "3px 10px", borderRadius: 20, color: "#fff", fontSize: 11, fontWeight: 700 },
   shareBtn: { background: "rgba(30,58,138,0.5)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600, textStyle: "center" },

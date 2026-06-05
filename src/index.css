@@ -11,19 +11,26 @@ html, body, #root {
   height: 100%;
   background-color: #000000;
   overflow: hidden;
-  color: white;
 }
 
+/* Fixes the gray canvas block and aligns layout layering */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  z-index: 0;
 }
 
+/* Custom scrollbar matching your theme */
 ::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(13, 17, 23, 0.5);
 }
 ::-webkit-scrollbar-thumb {
   background: #1f2937;
-  border-radius: 10px;
+  border-radius: 9999px;
 }

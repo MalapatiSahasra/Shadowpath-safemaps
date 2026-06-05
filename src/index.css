@@ -7,26 +7,11 @@
 body {
   overflow: hidden;
   background: #0a0e1a;
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
 }
 
-.leaflet-container {
-  background: #0a0e1a !important;
-}
-
-/* Custom scrollbar for HUD panel */
-::-webkit-scrollbar {
-  width: 4px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 2px;
-}
-
-/* SOS pulse animation */
-@keyframes pulse {
-  from { opacity: 1; transform: scale(1); }
-  to   { opacity: 0.8; transform: scale(1.02); }
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }

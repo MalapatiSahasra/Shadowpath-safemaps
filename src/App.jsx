@@ -179,6 +179,7 @@ async function reverseGeocode(lat, lng) {
   } catch { return `${lat.toFixed(4)}, ${lng.toFixed(4)}`; }
 }
 
+// Location Selector Component with Overlay Fixes
 function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value || "");
@@ -216,7 +217,7 @@ function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} style={{ position: "relative", zIndex: label === "DESTINATION" ? 10000 : 5000 }}>
       <div style={{ ...styles.inputRow, ...(label === "START POINT" && gpsDetecting ? { border: "1px solid rgba(34,211,238,0.5)" } : {}) }}>
         {label === "START POINT" ? (
           gpsDetecting ? ( <span className="gps-detecting" style={{ width: 10, height: 10, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} /> ) : ( <span style={{ color: "#60a5fa", fontSize: 14 }}>➤</span> )
@@ -574,7 +575,7 @@ export default function App() {
           <div style={styles.legendItem}>🟢 <span style={{ color: "#10b981", fontWeight: 'bold' }}>Safest Route Vector Track (Lit)</span></div>
           <div style={styles.legendItem}>🔴 <span style={{ color: "#ef4444", fontWeight: 'bold' }}>Unlit High Risk Shortcut Track</span></div>
           <div style={styles.legendItem}>💡 <span>Amber Bulbs: <strong>Active Streetlight Aura</strong></span></div>
-          <div style={styles.legendItem}>🚓 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
+          <div style={styles.legendItem}>栽培 <span>Shield Unit: <strong>Nearest Emergency Refuge Station</strong></span></div>
         </div>
 
         <div style={styles.footer}><span>Right-click map frame to submit tags</span><span style={{ color: "#4f46e5" }}>ShadowPath v1.0</span></div>
@@ -612,7 +613,7 @@ const styles = {
   inputLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700, marginBottom: 4 },
   inputRow: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.7)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, padding: "6px" },
   locationInput: { flex: 1, background: "transparent", border: "none", color: "#e0e7ff", fontSize: 12, outline: "none" },
-  dropdown: { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "rgba(10,14,30,0.98)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, zIndex: 9999, maxHeight: 150, overflowY: "auto" },
+  dropdown: { position: "absolute", top: "100%", left: 0, right: 0, background: "rgba(15,23,42,0.98)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, zIndex: 99999, maxHeight: 180, overflowY: "auto", marginTop: "4px", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.7)" },
   dropdownItem: { padding: "6px 10px", color: "#cbd5e1", fontSize: 12, cursor: "pointer" },
   statsRow: { display: "flex", gap: 4 },
   statBox: { flex: 1, background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99, 102, 241, 0.12)", borderRadius: 8, padding: "6px 2px", textAlign: "center" },

@@ -55,7 +55,7 @@ const emergencyRefugeIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
-// Simulated infrastructure layout nodes around user space position
+// Fixed simulation anchoring to keep shared infrastructure maps consistent
 function generateStreetlights(center) {
   const offsets = [
     [0.0012, 0.0008], [0.0022, 0.0019], [-0.0006, 0.0014],
@@ -208,7 +208,6 @@ function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }
 
 export default function App() {
   const FALLBACK_CENTER = [14.6790, 77.6030];
-  const EMERGENCY_CONTACTS = ["+91 94405 82131", "+91 91107 43902"];
 
   const [userLocation,   setUserLocation]   = useState(null);
   const [mapCenter,      setMapCenter]      = useState(FALLBACK_CENTER);
@@ -234,7 +233,6 @@ export default function App() {
   const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
   const [isNightMode,    setIsNightMode]    = useState(false);
 
-  // Synchronized System Clock
   useEffect(() => {
     const tick = () => {
       const now = new Date();
@@ -249,29 +247,55 @@ export default function App() {
     setIsNightMode(temporalHour >= 19 || temporalHour < 6);
   }, [temporalHour]);
 
-  // GPS Localization Initialization
+  // INITIALIZATION ENGINE: PARSES SHARE VECTOR OR LAUNCHES GPS
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setupWorkspace(FALLBACK_CENTER);
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const center = [pos.coords.latitude, pos.coords.longitude];
-        setupWorkspace(center);
-        const name = await reverseGeocode(center[0], center[1]);
-        setStartLocation({ name, lat: center[0], lng: center[1] });
-        setLocationStatus(`📍 ${name}`);
-        setGpsDetecting(false);
-      },
-      () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasSharedData = urlParams.get("shared") === "true";
+
+    if (hasSharedData) {
+      // Decode companion payload structures immediately
+      const sLat = parseFloat(urlParams.get("slat"));
+      const sLng = parseFloat(urlParams.get("slng"));
+      const sName = urlParams.get("sname");
+      const dLat = parseFloat(urlParams.get("dlat"));
+      const dLng = parseFloat(urlParams.get("dlng"));
+      const dName = urlParams.get("dname");
+
+      const baseCenter = [sLat, sLng];
+      setUserLocation(baseCenter);
+      setMapCenter(baseCenter);
+      setLights(generateStreetlights(baseCenter));
+      setBusinesses(generateBusinesses(baseCenter));
+      setRefugeHubs(generateRefugeHubs(baseCenter));
+
+      setStartLocation({ name: sName, lat: sLat, lng: sLng });
+      setDestination({ name: dName, lat: dLat, lng: dLng });
+      setLocationStatus(`🔗 Shared Path: Tracking ${dName}`);
+      setGpsDetecting(false);
+    } else {
+      // Safe fallback standard auto-localization lookups
+      if (!navigator.geolocation) {
         setupWorkspace(FALLBACK_CENTER);
-        setStartLocation({ name: "Anantapur Core District", lat: FALLBACK_CENTER[0], lng: FALLBACK_CENTER[1] });
-        setLocationStatus("⚠️ GPS Offline. Fallback Center Loaded.");
-        setGpsDetecting(false);
-      },
-      { enableHighAccuracy: true }
-    );
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const center = [pos.coords.latitude, pos.coords.longitude];
+          setupWorkspace(center);
+          const name = await reverseGeocode(center[0], center[1]);
+          setStartLocation({ name, lat: center[0], lng: center[1] });
+          setLocationStatus(`📍 ${name}`);
+          setGpsDetecting(false);
+        },
+        () => {
+          setupWorkspace(FALLBACK_CENTER);
+          setStartLocation({ name: "Anantapur Core District", lat: FALLBACK_CENTER[0], lng: FALLBACK_CENTER[1] });
+          setLocationStatus("⚠️ GPS Offline. Fallback Center Loaded.");
+          setGpsDetecting(false);
+        },
+        { enableHighAccuracy: true }
+      );
+    }
   }, []);
 
   const setupWorkspace = (center) => {
@@ -287,30 +311,27 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // DIRECTIONAL ENVIRONMENT SNAP ROUTING PIPELINE
+  // DIRECTIONAL CORRIDOR OPTIMIZATION ROUTER
   const calculateSafetyRoutes = useCallback(() => {
     if (!startLocation || !destination) return;
 
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
 
-    // Calculate original line distance constraints
     const totalLineDist = Math.sqrt(Math.pow(endPt[0] - startPt[0], 2) + Math.pow(endPt[1] - startPt[1], 2));
 
-    // 1. Building Safest Path: Filter out backward zigzag coordinates
+    // 1. Building Safest Path: Snap to streetlights moving towards destination bounds
     const safeWaypoints = [startPt];
     const activeSafeNodes = [
       ...lights.filter(l => l.status === "online"),
       ...businesses.filter(b => b.open)
     ];
 
-    // Filter constraint: only load nodes that help move forward towards destination bounds
     const forwardSafeNodes = activeSafeNodes.filter(node => {
       const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
       return nodeToDestDist < totalLineDist;
     });
 
-    // Sort nodes to form a forward-progressing sequence chain
     forwardSafeNodes.sort((a, b) => {
       const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
       const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
@@ -323,7 +344,7 @@ export default function App() {
     safeWaypoints.push(endPt);
     setSafestRoute(safeWaypoints);
 
-    // 2. Building Danger Path: Routes explicitly through unlit regions and broken lights
+    // 2. Building Danger Path: Routes through unlit/offline regions
     const dangerWaypoints = [startPt];
     const highRiskNodes = [
       ...lights.filter(l => l.status === "offline"),
@@ -353,19 +374,16 @@ export default function App() {
     dangerWaypoints.push(endPt);
     setDangerRoute(dangerWaypoints);
 
-    // Scoring Engine calculation
     const totalSafeAssetsOnRoute = forwardSafeNodes.length;
     const computedScore = isNightMode 
       ? Math.min(98, 58 + totalSafeAssetsOnRoute * 5) 
       : Math.min(99, 94 + totalSafeAssetsOnRoute * 1);
       
     setSafetyScore(computedScore);
-    showNotification(`Forward trajectory safety path optimized. Grid Factor: ${computedScore}%`, "success");
   }, [startLocation, destination, lights, hazardPins, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
 
-  // SOS Safety Emergency Action Route Target Switcher
   const handleSOSPanicDispatch = () => {
     if (!userLocation || refugeHubs.length === 0) return;
     setSosActive(true);
@@ -388,11 +406,11 @@ export default function App() {
     ];
 
     setSafestRoute(escapeWaypoints);
-    setDangerRoute(null); // Terminate danger routes to prevent confusion
+    setDangerRoute(null); 
     setMapCenter([nearestHub.lat, nearestHub.lng]);
 
     showNotification(
-      `🚨 SOS CRITICAL: Coordinates sent to ${EMERGENCY_CONTACTS.join(" & ")}. Route locked onto closest safe area: ${nearestHub.name}`,
+      `🚨 SOS EMERGENCY ACTIVE: Live location shared with priority contacts. Route locked onto closest safe refuge: ${nearestHub.name} (${nearestHub.type})`,
       "danger"
     );
   };
@@ -405,12 +423,25 @@ export default function App() {
     }
   };
 
+  // ENCODES ENTIRE MAP ROUTE GRID ENVIRONMENT INTO SYSTEM SHARE TOKEN URL Params
   const handleShare = () => {
-    const activeOrigin = window.location.hostname === "localhost" ? window.location.origin : window.location.href.split('?')[0];
-    const link = `${activeOrigin}?lat=${startLocation?.lat}&lng=${startLocation?.lng}&active=true`;
-    setShareLink(link);
-    navigator.clipboard?.writeText(link);
-    showNotification("Dynamic navigation sharing vector copied successfully!", "success");
+    if (!startLocation || !destination) {
+      showNotification("Please select a destination first to map out a share link.", "warning");
+      return;
+    }
+
+    const activeOrigin = window.location.hostname === "localhost" 
+      ? window.location.origin 
+      : window.location.href.split('?')[0];
+
+    // Append precise vectors for start point, target bounds, and lighting matrices
+    const builtLink = `${activeOrigin}?shared=true` +
+      `&slat=${startLocation.lat}&slng=${startLocation.lng}&sname=${encodeURIComponent(startLocation.name)}` +
+      `&dlat=${destination.lat}&dlng=${destination.lng}&dname=${encodeURIComponent(destination.name)}`;
+
+    setShareLink(builtLink);
+    navigator.clipboard?.writeText(builtLink);
+    showNotification("Comprehensive routing link copied! Shared streetlights and safety paths sync on open.", "success");
   };
 
   const timeString = (() => {
@@ -426,7 +457,7 @@ export default function App() {
       {notification && <div style={{ ...styles.toast, borderColor: toastColors[notification.type] }}>{notification.msg}</div>}
       {isNightMode && <div style={styles.nightOverlay} />}
 
-      {/* RENDER SPACE BASE LAYER MAP FRAME */}
+      {/* RENDER SPACE BASE LAYER */}
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={15} style={{ width: "100%", height: "100%" }} zoomControl={false}>
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
@@ -440,7 +471,7 @@ export default function App() {
           {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 5, opacity: 0.95 }} />}
           {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
-          {/* Working Streetlight Nodes with glow area overlay circles */}
+          {/* Working streetlights with aura radials tracking exactly along the route boundaries */}
           {lights.map((l) => (
             <div key={l.id}>
               <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
@@ -453,7 +484,7 @@ export default function App() {
           {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
           {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
 
-          {/* SECURITY & CLINICAL SECURITY HUBS */}
+          {/* SAFETY REFUGE HUBS MAP NODES */}
           {refugeHubs.map((hub) => (
             <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}>
               <Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup>

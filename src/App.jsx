@@ -55,7 +55,7 @@ const emergencyRefugeIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
-// Fixed simulation anchoring to keep shared infrastructure maps consistent
+// Anchor data points generator
 function generateStreetlights(center) {
   const offsets = [
     [0.0012, 0.0008], [0.0022, 0.0019], [-0.0006, 0.0014],
@@ -92,6 +92,54 @@ function generateRefugeHubs(center) {
     { id: 101, name: "City Core Police Station", lat: center[0] + 0.0012, lng: center[1] - 0.0035, type: "Police Station" },
     { id: 102, name: "District General Hospital", lat: center[0] - 0.0028, lng: center[1] + 0.0019, type: "Hospital" }
   ];
+}
+
+// Generates explicit alternative forward-moving route vectors (Safest vs Dangerous)
+function generateDualRoutes(startPt, endPt, streetlights, hazardPins) {
+  const totalLineDist = Math.sqrt(Math.pow(endPt[0] - startPt[0], 2) + Math.pow(endPt[1] - startPt[1], 2));
+
+  // 1. Safest Path Core Engine
+  const safeWaypoints = [startPt];
+  const forwardSafeNodes = streetlights.filter(l => {
+    if (l.status !== "online") return false;
+    const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - l.lat, 2) + Math.pow(endPt[1] - l.lng, 2));
+    return nodeToDestDist < totalLineDist;
+  });
+
+  forwardSafeNodes.sort((a, b) => {
+    const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
+    const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
+    return distA - distB;
+  });
+
+  forwardSafeNodes.slice(0, 4).forEach(node => safeWaypoints.push([node.lat, node.lng]));
+  safeWaypoints.push(endPt);
+
+  // 2. Danger Path Core Engine
+  const dangerWaypoints = [startPt];
+  const highRiskNodes = [
+    ...streetlights.filter(l => l.status === "offline"),
+    ...hazardPins
+  ];
+
+  const forwardRiskNodes = highRiskNodes.filter(node => {
+    const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
+    return nodeToDestDist < totalLineDist;
+  });
+
+  forwardRiskNodes.sort((a, b) => {
+    const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
+    const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
+    return distA - distB;
+  });
+
+  forwardRiskNodes.slice(0, 3).forEach(node => dangerWaypoints.push([node.lat, node.lng]));
+  if (dangerWaypoints.length === 1) {
+    dangerWaypoints.push([(startPt[0] + endPt[0]) / 2 - 0.0015, (startPt[1] + endPt[1]) / 2 - 0.0015]);
+  }
+  dangerWaypoints.push(endPt);
+
+  return { safeWaypoints, dangerWaypoints, forwardSafeNodesCount: forwardSafeNodes.length };
 }
 
 function MapRecenter({ center }) {
@@ -247,13 +295,12 @@ export default function App() {
     setIsNightMode(temporalHour >= 19 || temporalHour < 6);
   }, [temporalHour]);
 
-  // INITIALIZATION ENGINE: PARSES SHARE VECTOR OR LAUNCHES GPS
+  // COMPREHENSIVE ATOMIC INITIALIZER: SYNC LINES INSTANTLY ON URL OPEN
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const hasSharedData = urlParams.get("shared") === "true";
 
     if (hasSharedData) {
-      // Decode companion payload structures immediately
       const sLat = parseFloat(urlParams.get("slat"));
       const sLng = parseFloat(urlParams.get("slng"));
       const sName = urlParams.get("sname");
@@ -262,18 +309,33 @@ export default function App() {
       const dName = urlParams.get("dname");
 
       const baseCenter = [sLat, sLng];
+      const sharedLights = generateStreetlights(baseCenter);
+      const sharedBusinesses = generateBusinesses(baseCenter);
+
       setUserLocation(baseCenter);
       setMapCenter(baseCenter);
-      setLights(generateStreetlights(baseCenter));
-      setBusinesses(generateBusinesses(baseCenter));
+      setLights(sharedLights);
+      setBusinesses(sharedBusinesses);
       setRefugeHubs(generateRefugeHubs(baseCenter));
 
-      setStartLocation({ name: sName, lat: sLat, lng: sLng });
-      setDestination({ name: dName, lat: dLat, lng: dLng });
-      setLocationStatus(`🔗 Shared Path: Tracking ${dName}`);
+      const startObj = { name: sName, lat: sLat, lng: sLng };
+      const destObj = { name: dName, lat: dLat, lng: dLng };
+      setStartLocation(startObj);
+      setDestination(destObj);
+
+      // FORCE INTEGRATED EVALUATION IMMEDIATELY
+      const { safeWaypoints, dangerWaypoints, forwardSafeNodesCount } = generateDualRoutes(
+        [sLat, sLng], [dLat, dLng], sharedLights, []
+      );
+      setSafestRoute(safeWaypoints);
+      setDangerRoute(dangerWaypoints);
+
+      const checkNight = new Date().getHours() >= 19 || new Date().getHours() < 6;
+      setSafetyScore(checkNight ? Math.min(98, 55 + forwardSafeNodesCount * 5) : 95);
+
+      setLocationStatus(`🔗 Shared Companion View: Destination Locked`);
       setGpsDetecting(false);
     } else {
-      // Safe fallback standard auto-localization lookups
       if (!navigator.geolocation) {
         setupWorkspace(FALLBACK_CENTER);
         return;
@@ -311,75 +373,26 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // DIRECTIONAL CORRIDOR OPTIMIZATION ROUTER
+  // NORMAL INTERACTION ROUTING WORKFLOW
   const calculateSafetyRoutes = useCallback(() => {
-    if (!startLocation || !destination) return;
+    if (!startLocation || !destination || window.location.search.includes("shared=true")) return;
 
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
 
-    const totalLineDist = Math.sqrt(Math.pow(endPt[0] - startPt[0], 2) + Math.pow(endPt[1] - startPt[1], 2));
+    const { safeWaypoints, dangerWaypoints, forwardSafeNodesCount } = generateDualRoutes(
+      startPt, endPt, lights, hazardPins
+    );
 
-    // 1. Building Safest Path: Snap to streetlights moving towards destination bounds
-    const safeWaypoints = [startPt];
-    const activeSafeNodes = [
-      ...lights.filter(l => l.status === "online"),
-      ...businesses.filter(b => b.open)
-    ];
-
-    const forwardSafeNodes = activeSafeNodes.filter(node => {
-      const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
-      return nodeToDestDist < totalLineDist;
-    });
-
-    forwardSafeNodes.sort((a, b) => {
-      const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
-      const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
-      return distA - distB;
-    });
-
-    forwardSafeNodes.slice(0, 4).forEach(node => {
-      safeWaypoints.push([node.lat, node.lng]);
-    });
-    safeWaypoints.push(endPt);
     setSafestRoute(safeWaypoints);
-
-    // 2. Building Danger Path: Routes through unlit/offline regions
-    const dangerWaypoints = [startPt];
-    const highRiskNodes = [
-      ...lights.filter(l => l.status === "offline"),
-      ...hazardPins
-    ];
-
-    const forwardRiskNodes = highRiskNodes.filter(node => {
-      const nodeToDestDist = Math.sqrt(Math.pow(endPt[0] - node.lat, 2) + Math.pow(endPt[1] - node.lng, 2));
-      return nodeToDestDist < totalLineDist;
-    });
-
-    forwardRiskNodes.sort((a, b) => {
-      const distA = Math.pow(a.lat - startPt[0], 2) + Math.pow(a.lng - startPt[1], 2);
-      const distB = Math.pow(b.lat - startPt[0], 2) + Math.pow(b.lng - startPt[1], 2);
-      return distA - distB;
-    });
-
-    forwardRiskNodes.slice(0, 3).forEach(node => {
-      dangerWaypoints.push([node.lat, node.lng]);
-    });
-    
-    if (dangerWaypoints.length === 1) {
-      const midLat = (startPt[0] + endPt[0]) / 2 - 0.0015;
-      const midLng = (startPt[1] + endPt[1]) / 2 - 0.0015;
-      dangerWaypoints.push([midLat, midLng]);
-    }
-    dangerWaypoints.push(endPt);
     setDangerRoute(dangerWaypoints);
 
-    const totalSafeAssetsOnRoute = forwardSafeNodes.length;
     const computedScore = isNightMode 
-      ? Math.min(98, 58 + totalSafeAssetsOnRoute * 5) 
-      : Math.min(99, 94 + totalSafeAssetsOnRoute * 1);
+      ? Math.min(98, 55 + forwardSafeNodesCount * 5) 
+      : Math.min(99, 94 + forwardSafeNodesCount * 1);
       
     setSafetyScore(computedScore);
+    showNotification(`Forward trajectory safety path optimized. Grid Factor: ${computedScore}%`, "success");
   }, [startLocation, destination, lights, hazardPins, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
@@ -423,7 +436,6 @@ export default function App() {
     }
   };
 
-  // ENCODES ENTIRE MAP ROUTE GRID ENVIRONMENT INTO SYSTEM SHARE TOKEN URL Params
   const handleShare = () => {
     if (!startLocation || !destination) {
       showNotification("Please select a destination first to map out a share link.", "warning");
@@ -434,7 +446,6 @@ export default function App() {
       ? window.location.origin 
       : window.location.href.split('?')[0];
 
-    // Append precise vectors for start point, target bounds, and lighting matrices
     const builtLink = `${activeOrigin}?shared=true` +
       `&slat=${startLocation.lat}&slng=${startLocation.lng}&sname=${encodeURIComponent(startLocation.name)}` +
       `&dlat=${destination.lat}&dlng=${destination.lng}&dname=${encodeURIComponent(destination.name)}`;
@@ -467,11 +478,11 @@ export default function App() {
           {startLocation && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* SAFEST (GREEN) VS DANGEROUS (RED DASHED) PATH LINE STRIPS */}
+          {/* DUAL TRAJECTORY PATH OVERLAYS */}
           {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 5, opacity: 0.95 }} />}
           {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
-          {/* Working streetlights with aura radials tracking exactly along the route boundaries */}
+          {/* Streetlights with working aura bounds */}
           {lights.map((l) => (
             <div key={l.id}>
               <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
@@ -484,7 +495,7 @@ export default function App() {
           {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
           {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
 
-          {/* SAFETY REFUGE HUBS MAP NODES */}
+          {/* REFUGE STATION NODES */}
           {refugeHubs.map((hub) => (
             <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}>
               <Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup>
@@ -497,7 +508,7 @@ export default function App() {
         </MapContainer>
       </div>
 
-      {/* DASHBOARD CONSOLE HUD INTERFACE OVERLAY */}
+      {/* DASHBOARD HUD OVERLAY */}
       <div className="hud-scrollbar" style={styles.hud}>
         <div style={styles.header}>
           <div style={styles.logoBox}><span style={{ fontSize: 22 }}>🛡️</span></div>
@@ -536,7 +547,6 @@ export default function App() {
           {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
         </div>
 
-        {/* SOS BUTTON SWITCH DISPATCHER */}
         <button style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }} onClick={handleSOSPanicDispatch}>
           🚨 {sosActive ? "SOS EMERGENCY ACCELERATED..." : "🛡️ ACTIVATE SOS PANIC REFUGE"}
         </button>

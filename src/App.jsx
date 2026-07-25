@@ -40,35 +40,64 @@ function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
 
-// BULLETPROOF 3-TIER OSRM ENGINE
+// Formats raw OSRM maneuver data into human-readable directions
+function formatInstruction(step) {
+  const type = step.maneuver?.type;
+  const modifier = step.maneuver?.modifier;
+  const name = step.name ? step.name : "unnamed road";
+  const dist = Math.round(step.distance);
+
+  if (type === 'depart') return `Start your journey on ${name}`;
+  if (type === 'arrive') return `You will arrive at your destination`;
+  
+  let action = "Head";
+  if (type === 'turn') action = "Turn";
+  if (type === 'roundabout') action = "Enter the roundabout and exit onto";
+  if (type === 'merge') action = "Merge onto";
+  if (type === 'fork') action = "Keep";
+
+  const dir = modifier ? ` ${modifier.replace('-', ' ')}` : "";
+  return `${action}${dir} onto ${name} (${dist}m)`;
+}
+
+// BULLETPROOF 3-TIER OSRM ENGINE WITH DIRECTIONS
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   const baseUrl = "https://router.project-osrm.org/route/v1";
   const coords = `${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}`;
+  // steps=true is added to fetch turn-by-turn instructions
+  const queryParams = `overview=full&geometries=geojson&steps=true&alternatives=${alternativeMode}`;
   
   try {
-    // Attempt 1: Pedestrian (Foot)
-    let res = await fetch(`${baseUrl}/foot/${coords}?overview=full&geometries=geojson&alternatives=${alternativeMode}`);
+    let res = await fetch(`${baseUrl}/foot/${coords}?${queryParams}`);
     let data = await res.json();
 
-    // Attempt 2: Standard Driving (if foot is too far or has no paths)
     if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
       console.warn("Foot routing failed. Trying driving profile...");
-      res = await fetch(`${baseUrl}/driving/${coords}?overview=full&geometries=geojson&alternatives=${alternativeMode}`);
+      res = await fetch(`${baseUrl}/driving/${coords}?${queryParams}`);
       data = await res.json();
     }
 
-    // Attempt 3: Driving without alternatives (Heavy API load fallback)
     if (alternativeMode && (data.code !== "Ok" || !data.routes || data.routes.length === 0)) {
       console.warn("Alternatives failed. Trying forced direct route...");
-      res = await fetch(`${baseUrl}/driving/${coords}?overview=full&geometries=geojson&alternatives=false`);
+      res = await fetch(`${baseUrl}/driving/${coords}?overview=full&geometries=geojson&steps=true&alternatives=false`);
       data = await res.json();
     }
 
-    // Success Extraction
     if (data.code === "Ok" && data.routes && data.routes.length > 0) {
       const selectedRoute = alternativeMode && data.routes.length > 1 ? data.routes[1] : data.routes[0];
       const pathCoords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
-      return { coords: pathCoords, distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`, rawMeters: selectedRoute.distance };
+      
+      // Parse steps for directions HUD
+      const steps = selectedRoute.legs && selectedRoute.legs[0]?.steps 
+        ? selectedRoute.legs[0].steps.map(formatInstruction) 
+        : [];
+
+      return { 
+        coords: pathCoords, 
+        distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`, 
+        rawMeters: selectedRoute.distance,
+        steps: steps 
+      };
     }
   } catch (e) {
     console.error("OSRM Fetch Error: ", e);
@@ -182,6 +211,9 @@ export default function App() {
   const [safestRoute, setSafestRoute] = useState(null);
   const [dangerRoute, setDangerRoute] = useState(null);
   
+  const [directions, setDirections] = useState([]); // NEW STATE
+  const [showDirections, setShowDirections] = useState(false); // NEW STATE
+  
   const [hazardPins, setHazardPins] = useState([]);
   const [sosActive, setSosActive] = useState(false);
   const [shareLink, setShareLink] = useState(null);
@@ -282,7 +314,7 @@ export default function App() {
 
   const showNotification = (msg, type = "info") => {
     setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 5000); // Extended slightly so you can read errors
+    setTimeout(() => setNotification(null), 5000); 
   };
 
   const calculateSafetyRoutes = useCallback(async () => {
@@ -302,12 +334,20 @@ export default function App() {
       showNotification("🚨 Routing Error: The server could not find a physical road connecting these points. Try locations closer together.", "danger");
       setSafestRoute(null);
       setDangerRoute(null);
+      setDirections([]);
       return;
     }
 
     setDangerRoute(standardData.coords);
-    // If secure path failed but standard worked, map both to the standard path to prevent crashes
-    setSafestRoute(secureData ? secureData.coords : standardData.coords);
+    
+    // Assign route & extract directions
+    if (secureData) {
+      setSafestRoute(secureData.coords);
+      setDirections(secureData.steps);
+    } else {
+      setSafestRoute(standardData.coords);
+      setDirections(standardData.steps);
+    }
     
     const safeMeters = secureData ? secureData.rawMeters : standardData.rawMeters;
     const diffMeters = Math.max(0, Math.round(safeMeters - standardData.rawMeters));
@@ -339,8 +379,10 @@ export default function App() {
       if (data) {
         setSafestRoute(data.coords);
         setDangerRoute(null);
+        setDirections(data.steps);
         setMapCenter([nearestHub.lat, nearestHub.lng]);
         setIsNavigating(true);
+        setShowDirections(true);
       }
     });
 
@@ -369,6 +411,7 @@ export default function App() {
       return;
     }
     setIsNavigating(!isNavigating);
+    if (!isNavigating) setShowDirections(true); // Auto-open directions when tracking starts
     showNotification(isNavigating ? "Live Tracking Ended." : "Live Tracking Started! Follow the green path.", "success");
   };
 
@@ -448,6 +491,31 @@ export default function App() {
           {isNavigating ? "🛑 END NAVIGATION" : "🚀 START LIVE TRACKING"}
         </button>
 
+        {/* NEW TURN-BY-TURN DIRECTIONS PANEL */}
+        {safestRoute && directions.length > 0 && (
+          <div style={styles.directionsBox}>
+            <button 
+              style={styles.directionsToggle} 
+              onClick={() => setShowDirections(!showDirections)}
+            >
+              {showDirections ? "🔽 Hide Directions" : "▶️ Show Turn-by-Turn"}
+            </button>
+            
+            {showDirections && (
+              <div className="hud-scrollbar" style={styles.directionsList}>
+                {directions.map((dir, idx) => (
+                  <div key={idx} style={styles.directionItem}>
+                    <span style={{color: '#10b981', marginRight: '6px', fontSize: '14px'}}>
+                      {idx === 0 ? '🏁' : idx === directions.length - 1 ? '📍' : '↱'}
+                    </span>
+                    {dir}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {safetyScore !== null && safestRoute && (
           <div style={styles.comparisonBox}>
             <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, marginBottom: 6 }}>ENGINE ROUTING COMPARISON</div>
@@ -456,9 +524,6 @@ export default function App() {
             <div style={{ background: "rgba(99,102,241,0.06)", padding: "6px", borderRadius: 6, fontSize: 10, color: "#a5b4fc" }}>💡 Tradeoff: Swapped {routeMetrics.distanceTradeoff} for optimized safety corridors.</div>
           </div>
         )}
-
-        <button style={styles.shareBtn} onClick={handleShare}>🔗 Copy Companion Link</button>
-        {shareLink && <div style={styles.shareLink}>{shareLink}</div>}
 
         <div style={styles.temporalBox}>
           <div style={styles.temporalHeader}><span style={styles.temporalLabel}>⏱ TEMPORAL SYNC</span><span style={{ color: "#60a5fa", fontWeight: 700, fontSize: 14 }}>{timeString}</span></div>
@@ -470,19 +535,9 @@ export default function App() {
           🚨 {sosActive ? "SOS ESCAPE ROUTE ACTIVE..." : "🛡️ ACTIVATE SOS REFUGE"}
         </button>
 
-        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click map frame to drop hazard pin.", "warning"); }}>
-          ⚠️ {logMode ? "Click location on map..." : "+ Log Hazard Area"}
-        </button>
-
         <div style={styles.routeSection}>
           <LocationSelector label="START POINT" value={startLocation?.name || ""} onChange={setStartLocation} userLocation={userLocation || FALLBACK_CENTER} gpsDetecting={gpsDetecting} />
           <div style={{ marginTop: 10 }}><LocationSelector label="DESTINATION" value={destination?.name || ""} onChange={setDestination} userLocation={userLocation || FALLBACK_CENTER} /></div>
-        </div>
-
-        <div style={styles.statsRow}>
-          <div style={styles.statBox}><div style={{ fontSize: 16 }}>💡</div><div style={styles.statNum}>{lights.filter(l => l.status === "online").length}</div><div style={styles.statLabel}>Lights</div></div>
-          <div style={styles.statBox}><div style={{ fontSize: 16 }}>🏪</div><div style={styles.statNum}>{businesses.filter(b => b.open).length}</div><div style={styles.statLabel}>Safe Hubs</div></div>
-          <div style={styles.statBox}><div style={{ fontSize: 16 }}>⚠️</div><div style={styles.statNum}>{hazardPins.length}</div><div style={styles.statLabel}>Hazards</div></div>
         </div>
 
         <div style={styles.legendBox}>
@@ -490,7 +545,6 @@ export default function App() {
           <div style={styles.legendItem}>🟢 Safest Route Vector (Lit)</div>
           <div style={styles.legendItem}>🔴 Unlit High Risk Shortcut</div>
           <div style={styles.legendItem}>🔵 <strong>Live GPS Tracker</strong></div>
-          <div style={styles.legendItem}>🚓 Emergency Refuge Station</div>
         </div>
       </div>
     </div>
@@ -512,6 +566,10 @@ const styles = {
   scoreLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
   scoreBadge: { padding: "3px 10px", borderRadius: 20, color: "#fff", fontSize: 11, fontWeight: 700 },
   navBtn: { border: "none", borderRadius: 10, color: "#fff", padding: "12px", cursor: "pointer", fontSize: 12, fontWeight: 800, textTransform: "uppercase" },
+  directionsBox: { background: "rgba(15,23,42,0.9)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" },
+  directionsToggle: { background: "rgba(16,185,129,0.1)", border: "none", color: "#34d399", padding: "10px", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" },
+  directionsList: { maxHeight: "200px", overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 },
+  directionItem: { color: "#e0e7ff", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 6 },
   comparisonBox: { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, padding: "10px", marginTop: "2px" },
   metricRow: { display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: "bold", paddingBottom: 6 },
   shareBtn: { background: "rgba(30,58,138,0.5)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600 },

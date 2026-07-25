@@ -26,7 +26,6 @@ const shopIcon = L.divIcon({ className: "", html: `<div style="font-size:16px;fi
 const hazardIcon = L.divIcon({ className: "", html: `<div style="font-size:16px">⚠️</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
 const emergencyRefugeIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 0 6px #ef4444)">🚓</div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
 
-// Generates infrastructure features based dynamically on the midpoint of the journey path
 function generateStreetlights(center) {
   const offsets = [[0.0042, 0.0038], [0.0092, 0.0089], [-0.0036, 0.0074], [0.0121, -0.0025], [-0.0064, 0.0120], [0.0037, -0.0062], [0.0081, 0.0158], [-0.0079, -0.0036], [0.0168, 0.0062], [-0.0026, 0.0131]];
   return offsets.map((o, i) => ({ id: i + 1, lat: center[0] + o[0], lng: center[1] + o[1], status: i % 3 === 2 ? "offline" : "online" }));
@@ -41,28 +40,39 @@ function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
 
-// OSRM Engine with Smart Fallback (Foot -> Driving)
+// BULLETPROOF 3-TIER OSRM ENGINE
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
+  const baseUrl = "https://router.project-osrm.org/route/v1";
+  const coords = `${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}`;
+  
   try {
-    // 1. Try pedestrian routing first
-    let url = `https://router.openstreetmap.org/route/v1/foot/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
-    let res = await fetch(url);
+    // Attempt 1: Pedestrian (Foot)
+    let res = await fetch(`${baseUrl}/foot/${coords}?overview=full&geometries=geojson&alternatives=${alternativeMode}`);
     let data = await res.json();
 
-    // 2. If the distance is too long for foot routing, fallback to driving routing
-    if (!data.routes || data.routes.length === 0) {
-      console.warn("Pedestrian route too long or unavailable. Falling back to driving profile...");
-      url = `https://router.openstreetmap.org/route/v1/driving/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
-      res = await fetch(url);
+    // Attempt 2: Standard Driving (if foot is too far or has no paths)
+    if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
+      console.warn("Foot routing failed. Trying driving profile...");
+      res = await fetch(`${baseUrl}/driving/${coords}?overview=full&geometries=geojson&alternatives=${alternativeMode}`);
       data = await res.json();
     }
 
-    if (data.routes && data.routes.length > 0) {
-      const selectedRoute = alternativeMode && data.routes[1] ? data.routes[1] : data.routes[0];
-      const coords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
-      return { coords, distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`, rawMeters: selectedRoute.distance };
+    // Attempt 3: Driving without alternatives (Heavy API load fallback)
+    if (alternativeMode && (data.code !== "Ok" || !data.routes || data.routes.length === 0)) {
+      console.warn("Alternatives failed. Trying forced direct route...");
+      res = await fetch(`${baseUrl}/driving/${coords}?overview=full&geometries=geojson&alternatives=false`);
+      data = await res.json();
     }
-  } catch (e) { console.error("OSRM Route fetching error: ", e); }
+
+    // Success Extraction
+    if (data.code === "Ok" && data.routes && data.routes.length > 0) {
+      const selectedRoute = alternativeMode && data.routes.length > 1 ? data.routes[1] : data.routes[0];
+      const pathCoords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+      return { coords: pathCoords, distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`, rawMeters: selectedRoute.distance };
+    }
+  } catch (e) {
+    console.error("OSRM Fetch Error: ", e);
+  }
   return null;
 }
 
@@ -162,7 +172,7 @@ function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }
 }
 
 export default function App() {
-  const FALLBACK_CENTER = [9.9312, 76.2673]; // Kochi fallback
+  const FALLBACK_CENTER = [9.9312, 76.2673]; 
 
   const [userLocation, setUserLocation] = useState(null);
   const [mapCenter, setMapCenter] = useState(FALLBACK_CENTER);
@@ -190,7 +200,6 @@ export default function App() {
 
   const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m" });
 
-  // LIVE TRACKING STATES
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
 
@@ -206,7 +215,6 @@ export default function App() {
 
   useEffect(() => { setIsNightMode(temporalHour >= 19 || temporalHour < 6); }, [temporalHour]);
 
-  // Initial Location Setup & URL Param Checker
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const hasSharedData = urlParams.get("shared") === "true";
@@ -252,7 +260,6 @@ export default function App() {
     }
   }, []);
 
-  // LIVE GPS TRACKING LISTENER
   useEffect(() => {
     let watchId;
     if (isNavigating && navigator.geolocation) {
@@ -275,7 +282,7 @@ export default function App() {
 
   const showNotification = (msg, type = "info") => {
     setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 4000);
+    setTimeout(() => setNotification(null), 5000); // Extended slightly so you can read errors
   };
 
   const calculateSafetyRoutes = useCallback(async () => {
@@ -291,13 +298,26 @@ export default function App() {
     const standardData = await fetchOSRMRoute(startPt, endPt, false);
     const secureData = await fetchOSRMRoute(startPt, endPt, true);
 
-    if (standardData && secureData) {
-      setDangerRoute(standardData.coords);
-      setSafestRoute(secureData.coords);
-      const diffMeters = Math.max(0, Math.round(secureData.rawMeters - standardData.rawMeters));
-      setRouteMetrics({ standardDist: standardData.distanceText, shadowDist: secureData.distanceText, distanceTradeoff: `+${diffMeters} meters` });
-      setSafetyScore(isNightMode ? 86 : 97);
+    if (!standardData) {
+      showNotification("🚨 Routing Error: The server could not find a physical road connecting these points. Try locations closer together.", "danger");
+      setSafestRoute(null);
+      setDangerRoute(null);
+      return;
     }
+
+    setDangerRoute(standardData.coords);
+    // If secure path failed but standard worked, map both to the standard path to prevent crashes
+    setSafestRoute(secureData ? secureData.coords : standardData.coords);
+    
+    const safeMeters = secureData ? secureData.rawMeters : standardData.rawMeters;
+    const diffMeters = Math.max(0, Math.round(safeMeters - standardData.rawMeters));
+    
+    setRouteMetrics({ 
+      standardDist: standardData.distanceText, 
+      shadowDist: secureData ? secureData.distanceText : standardData.distanceText, 
+      distanceTradeoff: `+${diffMeters} meters` 
+    });
+    setSafetyScore(isNightMode ? 86 : 97);
   }, [startLocation, destination, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
@@ -320,7 +340,7 @@ export default function App() {
         setSafestRoute(data.coords);
         setDangerRoute(null);
         setMapCenter([nearestHub.lat, nearestHub.lng]);
-        setIsNavigating(true); // Automatically turn on live tracking for the escape route
+        setIsNavigating(true);
       }
     });
 
@@ -366,7 +386,6 @@ export default function App() {
 
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={14} style={{ width: "100%", height: "100%" }} zoomControl={false}>
-          {/* HIGH DETAIL OPENSTREETMAP LAYER WITH DYNAMIC CSS CLASS FOR DARK MODE */}
           <TileLayer 
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             className={isNightMode ? "detailed-dark-map" : ""}
@@ -377,7 +396,6 @@ export default function App() {
           {startLocation && !isNavigating && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* LIVE TRACKING MARKER */}
           {livePosition && isNavigating && (
             <Marker position={livePosition} icon={createIcon("#3b82f6", 20)}>
               <Popup>You are here</Popup>
@@ -416,14 +434,13 @@ export default function App() {
           <span style={{ fontSize: 10 }}>📡</span><span style={{ fontSize: 10, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden" }}>{locationStatus}</span>
         </div>
 
-        {safetyScore !== null && (
+        {safetyScore !== null && safestRoute && (
           <div style={styles.scoreBar}>
             <span style={styles.scoreLabel}>SAFETY SCORE</span>
             <span style={{ ...styles.scoreBadge, background: safetyScore >= 75 ? "#10b981" : "#f59e0b" }}>{safetyScore}% Safe</span>
           </div>
         )}
 
-        {/* NAVIGATION ACTION BUTTON */}
         <button 
           style={{ ...styles.navBtn, background: isNavigating ? "#ef4444" : "#10b981", boxShadow: isNavigating ? "0 0 15px rgba(239,68,68,0.5)" : "0 0 15px rgba(16,185,129,0.3)" }} 
           onClick={toggleNavigation}
@@ -431,7 +448,7 @@ export default function App() {
           {isNavigating ? "🛑 END NAVIGATION" : "🚀 START LIVE TRACKING"}
         </button>
 
-        {safetyScore !== null && (
+        {safetyScore !== null && safestRoute && (
           <div style={styles.comparisonBox}>
             <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, marginBottom: 6 }}>ENGINE ROUTING COMPARISON</div>
             <div style={styles.metricRow}><span style={{ color: "#cbd5e1" }}>🔴 Standard Route</span><span style={{ color: "#f87171" }}>{routeMetrics.standardDist}</span></div>

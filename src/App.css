@@ -73,3 +73,8 @@ input[type='range']::-webkit-slider-thumb:hover {
 
 button:hover { filter: brightness(1.1); }
 button:active { transform: scale(0.98); }
+
+/* Transforms high-detail OSM maps into a Google Maps style dark mode */
+.detailed-dark-map {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%) !important;
+}

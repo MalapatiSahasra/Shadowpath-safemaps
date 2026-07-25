@@ -41,12 +41,22 @@ function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
 
-// OSRM Real-world street pathing geometry engine - UPDATED TO 'foot' PROFILE
+// OSRM Engine with Smart Fallback (Foot -> Driving)
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   try {
-    const url = `https://router.openstreetmap.org/route/v1/foot/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
-    const res = await fetch(url);
-    const data = await res.json();
+    // 1. Try pedestrian routing first
+    let url = `https://router.openstreetmap.org/route/v1/foot/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
+    let res = await fetch(url);
+    let data = await res.json();
+
+    // 2. If the distance is too long for foot routing, fallback to driving routing
+    if (!data.routes || data.routes.length === 0) {
+      console.warn("Pedestrian route too long or unavailable. Falling back to driving profile...");
+      url = `https://router.openstreetmap.org/route/v1/driving/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
+      res = await fetch(url);
+      data = await res.json();
+    }
+
     if (data.routes && data.routes.length > 0) {
       const selectedRoute = alternativeMode && data.routes[1] ? data.routes[1] : data.routes[0];
       const coords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
@@ -356,7 +366,11 @@ export default function App() {
 
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={14} style={{ width: "100%", height: "100%" }} zoomControl={false}>
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          {/* HIGH DETAIL OPENSTREETMAP LAYER WITH DYNAMIC CSS CLASS FOR DARK MODE */}
+          <TileLayer 
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            className={isNightMode ? "detailed-dark-map" : ""}
+          />
           <MapRecenter center={mapCenter} />
           <MapClickHandler onMapClick={handleMapClick} />
 

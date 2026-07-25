@@ -41,10 +41,10 @@ function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
 
-// OSRM Real-world street pathing geometry engine
+// OSRM Real-world street pathing geometry engine - UPDATED TO 'foot' PROFILE
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   try {
-    const url = `https://router.openstreetmap.org/route/v1/driving/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
+    const url = `https://router.openstreetmap.org/route/v1/foot/${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}?overview=full&geometries=geojson&alternatives=${alternativeMode}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.routes && data.routes.length > 0) {
@@ -180,7 +180,7 @@ export default function App() {
 
   const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m" });
 
-  // LIVE TRACKING STATES (New Addition)
+  // LIVE TRACKING STATES
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
 
@@ -242,7 +242,7 @@ export default function App() {
     }
   }, []);
 
-  // LIVE GPS TRACKING LISTENER (New Addition)
+  // LIVE GPS TRACKING LISTENER
   useEffect(() => {
     let watchId;
     if (isNavigating && navigator.geolocation) {
@@ -363,7 +363,7 @@ export default function App() {
           {startLocation && !isNavigating && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
-          {/* NEW LIVE TRACKING MARKER */}
+          {/* LIVE TRACKING MARKER */}
           {livePosition && isNavigating && (
             <Marker position={livePosition} icon={createIcon("#3b82f6", 20)}>
               <Popup>You are here</Popup>
@@ -409,7 +409,7 @@ export default function App() {
           </div>
         )}
 
-        {/* NAVIGATION ACTION BUTTON (New) */}
+        {/* NAVIGATION ACTION BUTTON */}
         <button 
           style={{ ...styles.navBtn, background: isNavigating ? "#ef4444" : "#10b981", boxShadow: isNavigating ? "0 0 15px rgba(239,68,68,0.5)" : "0 0 15px rgba(16,185,129,0.3)" }} 
           onClick={toggleNavigation}

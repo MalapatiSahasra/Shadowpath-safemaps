@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { ArrowUp, Flag, MapPin, RotateCw, Volume2, VolumeX, LocateFixed } from "lucide-react";
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -18,6 +19,17 @@ const createIcon = (color, size = 14) =>
     html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.8);box-shadow:0 0 8px ${color}"></div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
+  });
+
+// Directional arrow marker for live navigation, rotated to match GPS heading
+const createHeadingIcon = (angle = 0) =>
+  L.divIcon({
+    className: "",
+    html: `<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;transform:rotate(${angle}deg);filter:drop-shadow(0 0 6px #3b82f6)">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="#3b82f6" stroke="#fff" stroke-width="1.5"><path d="M12 2 L19 21 L12 17 L5 21 Z"/></svg>
+    </div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 
 const streetlightIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 0 4px #f59e0b)">💡</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
@@ -40,6 +52,53 @@ function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
 
+// ---- Geometry helpers for live tracking (distance, bearing, route projection) ----
+const toRad = (deg) => (deg * Math.PI) / 180;
+const toDeg = (rad) => (rad * 180) / Math.PI;
+
+function haversineMeters(a, b) {
+  const R = 6371000;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function computeBearing(a, b) {
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Approximates the nearest point on the route polyline to a live GPS fix
+function nearestPointOnRoute(route, point) {
+  let bestIndex = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < route.length; i++) {
+    const d = haversineMeters(route[i], point);
+    if (d < bestDist) { bestDist = d; bestIndex = i; }
+  }
+  return { index: bestIndex, distance: bestDist };
+}
+
+function formatDistance(meters) {
+  if (!Number.isFinite(meters)) return "--";
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return "--";
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)} h ${mins % 60} min`;
+}
+
 // Formats raw OSRM maneuver data into human-readable directions
 function formatInstruction(step) {
   const type = step.maneuver?.type;
@@ -49,7 +108,7 @@ function formatInstruction(step) {
 
   if (type === 'depart') return `Start your journey on ${name}`;
   if (type === 'arrive') return `You will arrive at your destination`;
-  
+
   let action = "Head";
   if (type === 'turn') action = "Turn";
   if (type === 'roundabout') action = "Enter the roundabout and exit onto";
@@ -60,13 +119,28 @@ function formatInstruction(step) {
   return `${action}${dir} onto ${name} (${dist}m)`;
 }
 
+// Maps an OSRM maneuver to a turn-banner icon + rotation angle
+const MODIFIER_ANGLES = {
+  straight: 0, "slight right": 30, right: 90, "sharp right": 135,
+  uturn: 180, "sharp left": -135, left: -90, "slight left": -30,
+};
+
+function getManeuverVisual(step) {
+  const type = step?.type;
+  const modifier = step?.modifier;
+  if (type === "depart") return { Icon: Flag, angle: 0 };
+  if (type === "arrive") return { Icon: MapPin, angle: 0 };
+  if (type === "roundabout" || type === "rotary" || type === "roundabout turn") return { Icon: RotateCw, angle: 0 };
+  return { Icon: ArrowUp, angle: MODIFIER_ANGLES[modifier] ?? 0 };
+}
+
 // BULLETPROOF 3-TIER OSRM ENGINE WITH DIRECTIONS
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   const baseUrl = "https://router.project-osrm.org/route/v1";
   const coords = `${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}`;
   // steps=true is added to fetch turn-by-turn instructions
   const queryParams = `overview=full&geometries=geojson&steps=true&alternatives=${alternativeMode}`;
-  
+
   try {
     let res = await fetch(`${baseUrl}/foot/${coords}?${queryParams}`);
     let data = await res.json();
@@ -86,17 +160,24 @@ async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
     if (data.code === "Ok" && data.routes && data.routes.length > 0) {
       const selectedRoute = alternativeMode && data.routes.length > 1 ? data.routes[1] : data.routes[0];
       const pathCoords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
-      
-      // Parse steps for directions HUD
-      const steps = selectedRoute.legs && selectedRoute.legs[0]?.steps 
-        ? selectedRoute.legs[0].steps.map(formatInstruction) 
+
+      // Parse steps for the directions HUD and live turn-by-turn banner
+      const steps = selectedRoute.legs && selectedRoute.legs[0]?.steps
+        ? selectedRoute.legs[0].steps.map((s) => ({
+            text: formatInstruction(s),
+            distance: s.distance,
+            duration: s.duration,
+            type: s.maneuver?.type,
+            modifier: s.maneuver?.modifier,
+            location: s.maneuver?.location ? [s.maneuver.location[1], s.maneuver.location[0]] : null,
+          }))
         : [];
 
-      return { 
-        coords: pathCoords, 
-        distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`, 
+      return {
+        coords: pathCoords,
+        distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`,
         rawMeters: selectedRoute.distance,
-        steps: steps 
+        steps: steps
       };
     }
   } catch (e) {
@@ -105,9 +186,9 @@ async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   return null;
 }
 
-function MapRecenter({ center }) {
+function MapRecenter({ center, zoom }) {
   const map = useMap();
-  useEffect(() => { if (center) map.setView(center, map.getZoom()); }, [center, map]);
+  useEffect(() => { if (center) map.setView(center, zoom ?? map.getZoom()); }, [center, zoom, map]);
   return null;
 }
 
@@ -124,6 +205,12 @@ function MapBoundsUpdater({ standardRoute, shadowPathRoute }) {
 
 function MapClickHandler({ onMapClick }) {
   useMapEvents({ contextmenu(e) { onMapClick(e.latlng); } });
+  return null;
+}
+
+// Drops out of camera-follow mode the moment the user manually drags the map
+function FollowModeHandler({ active, onUserDrag }) {
+  useMapEvents({ dragstart() { if (active) onUserDrag(); } });
   return null;
 }
 
@@ -200,20 +287,27 @@ function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }
   );
 }
 
+// Live navigation tuning constants
+const ARRIVAL_THRESHOLD_M = 15;
+const STEP_ADVANCE_THRESHOLD_M = 25;
+const OFF_ROUTE_THRESHOLD_M = 40;
+const REROUTE_COOLDOWN_MS = 15000;
+const NAV_ZOOM = 17;
+
 export default function App() {
-  const FALLBACK_CENTER = [9.9312, 76.2673]; 
+  const FALLBACK_CENTER = [9.9312, 76.2673];
 
   const [userLocation, setUserLocation] = useState(null);
   const [mapCenter, setMapCenter] = useState(FALLBACK_CENTER);
   const [startLocation, setStartLocation] = useState(null);
   const [destination, setDestination] = useState(null);
-  
+
   const [safestRoute, setSafestRoute] = useState(null);
   const [dangerRoute, setDangerRoute] = useState(null);
-  
-  const [directions, setDirections] = useState([]); // NEW STATE
-  const [showDirections, setShowDirections] = useState(false); // NEW STATE
-  
+
+  const [directions, setDirections] = useState([]);
+  const [showDirections, setShowDirections] = useState(false);
+
   const [hazardPins, setHazardPins] = useState([]);
   const [sosActive, setSosActive] = useState(false);
   const [shareLink, setShareLink] = useState(null);
@@ -235,11 +329,25 @@ export default function App() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
 
+  // Live turn-by-turn navigation state
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [followMode, setFollowMode] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [heading, setHeading] = useState(0);
+  const [isRerouting, setIsRerouting] = useState(false);
+
+  const prevLivePositionRef = useRef(null);
+  const lastAnnouncedIndexRef = useRef(-1);
+  const lastRerouteAtRef = useRef(0);
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
   useEffect(() => {
     const tick = () => {
       const now = new Date();
       setTemporalHour(now.getHours());
       setTemporalMinute(now.getMinutes());
+      setNowMs(now.getTime());
     };
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
@@ -292,11 +400,26 @@ export default function App() {
     }
   }, []);
 
+  // GPS watch: tracks live position and derives a heading (device compass, else bearing of travel)
   useEffect(() => {
     let watchId;
     if (isNavigating && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
-        (pos) => setLivePosition([pos.coords.latitude, pos.coords.longitude]),
+        (pos) => {
+          const next = [pos.coords.latitude, pos.coords.longitude];
+          setHeading((prevHeading) => {
+            if (typeof pos.coords.heading === "number" && !Number.isNaN(pos.coords.heading) && pos.coords.speed > 0.3) {
+              return pos.coords.heading;
+            }
+            if (prevLivePositionRef.current) {
+              const d = haversineMeters(prevLivePositionRef.current, next);
+              if (d > 2) return computeBearing(prevLivePositionRef.current, next);
+            }
+            return prevHeading;
+          });
+          prevLivePositionRef.current = next;
+          setLivePosition(next);
+        },
         (err) => console.error("GPS Tracking lost:", err),
         { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
       );
@@ -314,15 +437,21 @@ export default function App() {
 
   const showNotification = (msg, type = "info") => {
     setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 5000); 
+    setTimeout(() => setNotification(null), 5000);
   };
+
+  const speak = useCallback((text) => {
+    if (!voiceEnabled || typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }, [voiceEnabled]);
 
   const calculateSafetyRoutes = useCallback(async () => {
     if (!startLocation || !destination) return;
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
     const midPoint = [(startPt[0] + endPt[0]) / 2, (startPt[1] + endPt[1]) / 2];
-    
+
     setLights(generateStreetlights(midPoint));
     setBusinesses(generateBusinesses(midPoint));
     setRefugeHubs(generateRefugeHubs(midPoint));
@@ -339,7 +468,7 @@ export default function App() {
     }
 
     setDangerRoute(standardData.coords);
-    
+
     // Assign route & extract directions
     if (secureData) {
       setSafestRoute(secureData.coords);
@@ -348,24 +477,116 @@ export default function App() {
       setSafestRoute(standardData.coords);
       setDirections(standardData.steps);
     }
-    
+
     const safeMeters = secureData ? secureData.rawMeters : standardData.rawMeters;
     const diffMeters = Math.max(0, Math.round(safeMeters - standardData.rawMeters));
-    
-    setRouteMetrics({ 
-      standardDist: standardData.distanceText, 
-      shadowDist: secureData ? secureData.distanceText : standardData.distanceText, 
-      distanceTradeoff: `+${diffMeters} meters` 
+
+    setRouteMetrics({
+      standardDist: standardData.distanceText,
+      shadowDist: secureData ? secureData.distanceText : standardData.distanceText,
+      distanceTradeoff: `+${diffMeters} meters`
     });
     setSafetyScore(isNightMode ? 86 : 97);
   }, [startLocation, destination, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
 
+  // Re-plans the route from a live GPS fix when the walker has drifted off the path
+  const rerouteFromLivePosition = useCallback(async (fromPoint) => {
+    if (!destination) return;
+    setIsRerouting(true);
+    showNotification("📡 Off route detected — recalculating path...", "warning");
+    const endPt = [destination.lat, destination.lng];
+    const standardData = await fetchOSRMRoute(fromPoint, endPt, false);
+    const secureData = await fetchOSRMRoute(fromPoint, endPt, true);
+    const chosen = secureData || standardData;
+
+    if (chosen) {
+      setDangerRoute(standardData ? standardData.coords : null);
+      setSafestRoute(chosen.coords);
+      setDirections(chosen.steps);
+      setCurrentStepIndex(0);
+      lastAnnouncedIndexRef.current = -1;
+      showNotification("✅ Route recalculated.", "success");
+    }
+    setIsRerouting(false);
+  }, [destination]);
+
+  // Derived live stats: distance to next turn, remaining distance/time — recomputed
+  // from the latest GPS fix rather than stored, so no state sync is needed on every tick.
+  const navStats = useMemo(() => {
+    const empty = { distanceToNext: 0, remainingDistance: 0, remainingDuration: 0 };
+    if (!isNavigating || !livePosition || directions.length === 0) return empty;
+    const step = directions[currentStepIndex];
+    if (!step?.location) return empty;
+
+    const distToManeuver = haversineMeters(livePosition, step.location);
+    const isLastStep = currentStepIndex === directions.length - 1;
+    if (isLastStep) {
+      return { distanceToNext: distToManeuver, remainingDistance: distToManeuver, remainingDuration: step.duration || 0 };
+    }
+
+    const remainingSteps = directions.slice(currentStepIndex + 1);
+    const remainingDistance = distToManeuver + remainingSteps.reduce((sum, s) => sum + (s.distance || 0), 0);
+    const remainingDuration = (distToManeuver / Math.max(step.distance || 1, 1)) * (step.duration || 0)
+      + remainingSteps.reduce((sum, s) => sum + (s.duration || 0), 0);
+    return { distanceToNext: distToManeuver, remainingDistance, remainingDuration };
+  }, [isNavigating, livePosition, directions, currentStepIndex]);
+
+  // Drives the Google-Maps-style banner: advances steps, follows the camera,
+  // detects off-route drift, and announces arrival — all in reaction to fresh GPS fixes.
+  useEffect(() => {
+    if (!isNavigating || !livePosition || directions.length === 0) return;
+
+    const step = directions[currentStepIndex];
+    if (step?.location) {
+      const distToManeuver = haversineMeters(livePosition, step.location);
+      const isLastStep = currentStepIndex === directions.length - 1;
+
+      if (isLastStep) {
+        if (distToManeuver < ARRIVAL_THRESHOLD_M) {
+          showNotification("🎉 You have arrived at your destination!", "success");
+          speak("You have arrived at your destination.");
+          setIsNavigating(false);
+        }
+      } else {
+        const advanceThreshold = currentStepIndex === 0 ? 15 : STEP_ADVANCE_THRESHOLD_M;
+        if (distToManeuver < advanceThreshold) {
+          setCurrentStepIndex((i) => Math.min(i + 1, directions.length - 1));
+        }
+      }
+    }
+
+    if (safestRoute && safestRoute.length > 1) {
+      const { distance: offRouteDist } = nearestPointOnRoute(safestRoute, livePosition);
+      const now = Date.now();
+      if (offRouteDist > OFF_ROUTE_THRESHOLD_M && now - lastRerouteAtRef.current > REROUTE_COOLDOWN_MS) {
+        lastRerouteAtRef.current = now;
+        rerouteFromLivePosition(livePosition);
+      }
+    }
+
+    if (followMode) setMapCenter(livePosition);
+  }, [livePosition, isNavigating, directions, currentStepIndex, safestRoute, followMode, speak, rerouteFromLivePosition]);
+
+  // Speaks each new turn instruction exactly once, as it becomes current
+  useEffect(() => {
+    if (!isNavigating || directions.length === 0) return;
+    if (lastAnnouncedIndexRef.current === currentStepIndex) return;
+    lastAnnouncedIndexRef.current = currentStepIndex;
+    const step = directions[currentStepIndex];
+    if (step) speak(step.text);
+  }, [currentStepIndex, isNavigating, directions, speak]);
+
+  const routeProgress = useMemo(() => {
+    if (!safestRoute || !isNavigating || !livePosition) return null;
+    return nearestPointOnRoute(safestRoute, livePosition);
+  }, [safestRoute, isNavigating, livePosition]);
+
   const handleSOSPanicDispatch = () => {
     const referenceLocation = livePosition || userLocation;
     if (!referenceLocation || refugeHubs.length === 0) return;
-    
+
     setSosActive(true);
     let nearestHub = refugeHubs[0];
     let closestDist = Infinity;
@@ -381,6 +602,9 @@ export default function App() {
         setDangerRoute(null);
         setDirections(data.steps);
         setMapCenter([nearestHub.lat, nearestHub.lng]);
+        setCurrentStepIndex(0);
+        setFollowMode(true);
+        lastAnnouncedIndexRef.current = -1;
         setIsNavigating(true);
         setShowDirections(true);
       }
@@ -410,9 +634,20 @@ export default function App() {
       showNotification("Please set a destination to begin live tracking.", "warning");
       return;
     }
-    setIsNavigating(!isNavigating);
-    if (!isNavigating) setShowDirections(true); // Auto-open directions when tracking starts
-    showNotification(isNavigating ? "Live Tracking Ended." : "Live Tracking Started! Follow the green path.", "success");
+    const startingNav = !isNavigating;
+    setIsNavigating(startingNav);
+
+    if (startingNav) {
+      setShowDirections(true);
+      setCurrentStepIndex(0);
+      setFollowMode(true);
+      lastAnnouncedIndexRef.current = -1;
+      prevLivePositionRef.current = null;
+      if (userLocation) setMapCenter(userLocation);
+    } else {
+      window.speechSynthesis?.cancel();
+    }
+    showNotification(startingNav ? "Live Tracking Started! Follow the green path." : "Live Tracking Ended.", "success");
   };
 
   const timeString = (() => {
@@ -422,6 +657,11 @@ export default function App() {
     return `${h12}:${String(temporalMinute).padStart(2, "0")} ${ampm}`;
   })();
 
+  const currentStep = isNavigating ? directions[currentStepIndex] : null;
+  const etaLabel = navStats.remainingDuration > 0
+    ? new Date(nowMs + navStats.remainingDuration * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "--";
+
   return (
     <div style={styles.app}>
       {notification && <div style={{ ...styles.toast, borderColor: toastColors[notification.type] }}>{notification.msg}</div>}
@@ -429,24 +669,33 @@ export default function App() {
 
       <div style={styles.mapContainer}>
         <MapContainer center={mapCenter} zoom={14} style={{ width: "100%", height: "100%" }} zoomControl={false}>
-          <TileLayer 
+          <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             className={isNightMode ? "detailed-dark-map" : ""}
           />
-          <MapRecenter center={mapCenter} />
+          <MapRecenter center={mapCenter} zoom={isNavigating ? NAV_ZOOM : undefined} />
           <MapClickHandler onMapClick={handleMapClick} />
+          <FollowModeHandler active={isNavigating} onUserDrag={() => setFollowMode(false)} />
 
           {startLocation && !isNavigating && <Marker position={[startLocation.lat, startLocation.lng]} icon={createIcon("#22d3ee", 16)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={createIcon("#f472b6", 16)} />}
 
           {livePosition && isNavigating && (
-            <Marker position={livePosition} icon={createIcon("#3b82f6", 20)}>
+            <Marker position={livePosition} icon={createHeadingIcon(heading)}>
               <Popup>You are here</Popup>
             </Marker>
           )}
 
-          {safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 6, opacity: 0.95, lineCap: "round" }} />}
-          {dangerRoute && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
+          {!isNavigating && safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 6, opacity: 0.95, lineCap: "round" }} />}
+          {isNavigating && safestRoute && (
+            <>
+              {routeProgress && routeProgress.index > 0 && (
+                <Polyline positions={safestRoute.slice(0, routeProgress.index + 1)} pathOptions={{ color: "#475569", weight: 5, opacity: 0.6 }} />
+              )}
+              <Polyline positions={routeProgress ? safestRoute.slice(routeProgress.index) : safestRoute} pathOptions={{ color: "#10b981", weight: 6, opacity: 0.95, lineCap: "round" }} />
+            </>
+          )}
+          {dangerRoute && !isNavigating && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
 
           {lights.map((l) => (
             <div key={l.id}>
@@ -463,8 +712,43 @@ export default function App() {
             <Circle center={livePosition || [startLocation.lat, startLocation.lng]} radius={500} pathOptions={{ color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.12 }} />
           )}
 
-          <MapBoundsUpdater standardRoute={dangerRoute} shadowPathRoute={safestRoute} />
+          {!isNavigating && <MapBoundsUpdater standardRoute={dangerRoute} shadowPathRoute={safestRoute} />}
         </MapContainer>
+
+        {isNavigating && currentStep && (
+          <div style={styles.navBanner}>
+            <div style={styles.navBannerIcon}>
+              {(() => {
+                const { Icon, angle } = getManeuverVisual(currentStep);
+                return <Icon size={30} style={{ transform: `rotate(${angle}deg)` }} />;
+              })()}
+            </div>
+            <div style={styles.navBannerText}>
+              <div style={styles.navBannerDistance}>{formatDistance(navStats.distanceToNext)}</div>
+              <div style={styles.navBannerInstruction}>{currentStep.text}</div>
+            </div>
+            <button style={styles.voiceBtn} onClick={() => setVoiceEnabled((v) => !v)} title={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"}>
+              {voiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            </button>
+          </div>
+        )}
+
+        {isNavigating && !followMode && (
+          <button style={styles.recenterBtn} onClick={() => { setFollowMode(true); if (livePosition) setMapCenter(livePosition); }}>
+            <LocateFixed size={16} /> Recenter
+          </button>
+        )}
+
+        {isNavigating && (
+          <div style={styles.navFooter}>
+            <span>{formatDistance(navStats.remainingDistance)} remaining</span>
+            <span>·</span>
+            <span>{formatDuration(navStats.remainingDuration)}</span>
+            <span>·</span>
+            <span>ETA {etaLabel}</span>
+            {isRerouting && <span style={{ color: "#f59e0b", marginLeft: 6 }}>Recalculating…</span>}
+          </div>
+        )}
       </div>
 
       <div className="hud-scrollbar" style={styles.hud}>
@@ -484,31 +768,38 @@ export default function App() {
           </div>
         )}
 
-        <button 
-          style={{ ...styles.navBtn, background: isNavigating ? "#ef4444" : "#10b981", boxShadow: isNavigating ? "0 0 15px rgba(239,68,68,0.5)" : "0 0 15px rgba(16,185,129,0.3)" }} 
+        <button
+          style={{ ...styles.navBtn, background: isNavigating ? "#ef4444" : "#10b981", boxShadow: isNavigating ? "0 0 15px rgba(239,68,68,0.5)" : "0 0 15px rgba(16,185,129,0.3)" }}
           onClick={toggleNavigation}
         >
           {isNavigating ? "🛑 END NAVIGATION" : "🚀 START LIVE TRACKING"}
         </button>
 
-        {/* NEW TURN-BY-TURN DIRECTIONS PANEL */}
+        {/* TURN-BY-TURN DIRECTIONS PANEL */}
         {safestRoute && directions.length > 0 && (
           <div style={styles.directionsBox}>
-            <button 
-              style={styles.directionsToggle} 
+            <button
+              style={styles.directionsToggle}
               onClick={() => setShowDirections(!showDirections)}
             >
               {showDirections ? "🔽 Hide Directions" : "▶️ Show Turn-by-Turn"}
             </button>
-            
+
             {showDirections && (
               <div className="hud-scrollbar" style={styles.directionsList}>
                 {directions.map((dir, idx) => (
-                  <div key={idx} style={styles.directionItem}>
+                  <div
+                    key={idx}
+                    style={{
+                      ...styles.directionItem,
+                      ...(isNavigating && idx === currentStepIndex ? styles.directionItemActive : {}),
+                      ...(isNavigating && idx < currentStepIndex ? styles.directionItemDone : {}),
+                    }}
+                  >
                     <span style={{color: '#10b981', marginRight: '6px', fontSize: '14px'}}>
                       {idx === 0 ? '🏁' : idx === directions.length - 1 ? '📍' : '↱'}
                     </span>
-                    {dir}
+                    {dir.text}
                   </div>
                 ))}
               </div>
@@ -574,6 +865,8 @@ const styles = {
   directionsToggle: { background: "rgba(16,185,129,0.1)", border: "none", color: "#34d399", padding: "10px", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" },
   directionsList: { maxHeight: "200px", overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 },
   directionItem: { color: "#e0e7ff", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 6 },
+  directionItemActive: { background: "rgba(16,185,129,0.12)", borderLeft: "3px solid #10b981", paddingLeft: 6, borderRadius: 4, fontWeight: 700, color: "#fff" },
+  directionItemDone: { opacity: 0.35 },
   comparisonBox: { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, padding: "10px", marginTop: "2px" },
   metricRow: { display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: "bold", paddingBottom: 6 },
   shareBtn: { background: "rgba(30,58,138,0.5)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600 },
@@ -599,4 +892,12 @@ const styles = {
   legendTitle: { color: "#9ca3af", fontSize: 9, fontWeight: 700, marginBottom: 6 },
   legendItem: { color: "#d1d5db", fontSize: 11, marginBottom: 4 },
   toast: { position: "fixed", top: 16, right: 16, zIndex: 9999, background: "rgba(10,14,30,0.95)", border: "1px solid", borderRadius: 8, padding: "10px", color: "#e0e7ff", fontSize: 12, fontWeight: 600, maxWidth: 280 },
+  navBanner: { position: "absolute", top: 12, left: 366, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
+  navBannerIcon: { color: "#34d399", flexShrink: 0, display: "flex" },
+  navBannerText: { flex: 1, minWidth: 0 },
+  navBannerDistance: { color: "#fff", fontSize: 20, fontWeight: 800, lineHeight: 1.1 },
+  navBannerInstruction: { color: "#cbd5e1", fontSize: 12, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  voiceBtn: { background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#a5b4fc", padding: 8, cursor: "pointer", display: "flex", flexShrink: 0 },
+  navFooter: { position: "absolute", bottom: 12, left: 366, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, justifyContent: "center", color: "#e0e7ff", fontSize: 12, fontWeight: 600 },
+  recenterBtn: { position: "absolute", top: 12, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 10, color: "#93c5fd", padding: "8px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, boxShadow: "0 4px 14px rgba(0,0,0,0.4)" },
 };

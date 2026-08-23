@@ -49,6 +49,33 @@ function generateBusinesses(center) {
   return places.map((p, i) => ({ id: i + 1, lat: center[0] + p.offset[0], lng: center[1] + p.offset[1], name: p.name, open: p.open }));
 }
 
+// Picks evenly-spaced points along a route's coordinates, with a small jitter so the
+// point sits just off the road — used to seed streetlights/businesses that a route can
+// actually pass near, instead of scattering them around an unrelated geometric midpoint.
+function sampleAlongRoute(routeCoords, count, jitterDeg) {
+  if (!routeCoords || routeCoords.length === 0) return [];
+  const pts = [];
+  const step = Math.max(1, Math.floor(routeCoords.length / count));
+  for (let i = 0; i < routeCoords.length && pts.length < count; i += step) {
+    const [lat, lng] = routeCoords[i];
+    pts.push([lat + (Math.random() - 0.5) * 2 * jitterDeg, lng + (Math.random() - 0.5) * 2 * jitterDeg]);
+  }
+  return pts;
+}
+
+// Streetlights/businesses actually distributed along the route(s) being scored, so
+// coverage — and the green/yellow segment coloring — reflects the real path.
+function generateStreetlightsAlongRoute(routeCoords) {
+  const points = sampleAlongRoute(routeCoords, 16, 0.0006);
+  return points.map((p, i) => ({ id: i + 1, lat: p[0], lng: p[1], status: i % 3 === 2 ? "offline" : "online" }));
+}
+
+function generateBusinessesAlongRoute(routeCoords) {
+  const names = ["Local Market Square", "Emergency Pharmacy 24/7", "Central Food Court", "Convenience Store Hub", "Night Owl Cafe", "Corner Grocery"];
+  const points = sampleAlongRoute(routeCoords, 6, 0.0006);
+  return points.map((p, i) => ({ id: i + 1, lat: p[0], lng: p[1], name: names[i % names.length], open: i % 4 !== 2 }));
+}
+
 function generateRefugeHubs(center) {
   return [{ id: 101, name: "City Core Police Station", lat: center[0] + 0.0042, lng: center[1] - 0.0125, type: "Police Station" }, { id: 102, name: "District General Hospital", lat: center[0] - 0.0098, lng: center[1] + 0.0079, type: "Hospital" }];
 }
@@ -560,11 +587,6 @@ export default function App() {
     const startPt = [startLocation.lat, startLocation.lng];
     const endPt = [destination.lat, destination.lng];
     const midPoint = [(startPt[0] + endPt[0]) / 2, (startPt[1] + endPt[1]) / 2];
-
-    const midLights = generateStreetlights(midPoint);
-    const midBusinesses = generateBusinesses(midPoint);
-    setLights(midLights);
-    setBusinesses(midBusinesses);
     setRefugeHubs(generateRefugeHubs(midPoint));
 
     const routeOptions = await fetchOSRMRouteOptions(startPt, endPt);
@@ -577,10 +599,19 @@ export default function App() {
       return;
     }
 
+    // Seed streetlights/businesses along the actual candidate route geometry (not a
+    // fixed offset from the midpoint) so coverage — and the green segments — reflect
+    // roads a route could realistically pass, and both alternatives get a fair shot.
+    const combinedCoords = routeOptions.flatMap((r) => r.coords);
+    const routeLights = generateStreetlightsAlongRoute(combinedCoords);
+    const routeBusinesses = generateBusinessesAlongRoute(combinedCoords);
+    setLights(routeLights);
+    setBusinesses(routeBusinesses);
+
     // Score every alternative by how much of it runs near lit streetlights / open
     // businesses, then pick the best-covered one as the "safest" route — not a guess.
     const scored = routeOptions
-      .map((r) => ({ ...r, coverage: scoreRouteCoverage(r.coords, midLights, midBusinesses) }))
+      .map((r) => ({ ...r, coverage: scoreRouteCoverage(r.coords, routeLights, routeBusinesses) }))
       .sort((a, b) => b.coverage - a.coverage || a.rawMeters - b.rawMeters);
 
     const safest = scored[0];

@@ -35,6 +35,7 @@ const createHeadingIcon = (angle = 0) =>
 const streetlightIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 0 4px #f59e0b)">💡</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
 const brokenLightIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;opacity:0.5">🔦</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
 const shopIcon = L.divIcon({ className: "", html: `<div style="font-size:16px;filter:drop-shadow(0 0 4px #10b981)">🏪</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
+const closedShopIcon = L.divIcon({ className: "", html: `<div style="font-size:16px;opacity:0.35;filter:grayscale(1)">🏪</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
 const hazardIcon = L.divIcon({ className: "", html: `<div style="font-size:16px">⚠️</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
 const emergencyRefugeIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 0 6px #ef4444)">🚓</div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
 
@@ -86,6 +87,47 @@ function nearestPointOnRoute(route, point) {
   return { index: bestIndex, distance: bestDist };
 }
 
+// Radii used to judge whether a stretch of route is "covered" by safety infrastructure
+const LIGHT_COVERAGE_RADIUS_M = 150;
+const BUSINESS_COVERAGE_RADIUS_M = 120;
+
+function isPointCovered(point, lights, businesses) {
+  const nearLight = lights.some((l) => l.status === "online" && haversineMeters(point, [l.lat, l.lng]) <= LIGHT_COVERAGE_RADIUS_M);
+  if (nearLight) return true;
+  return businesses.some((b) => b.open && haversineMeters(point, [b.lat, b.lng]) <= BUSINESS_COVERAGE_RADIUS_M);
+}
+
+// Fraction of a route's length that falls within streetlight/business coverage — the
+// actual basis for calling one alternative "safer" than another, rather than a guess.
+function scoreRouteCoverage(routeCoords, lights, businesses) {
+  if (!routeCoords || routeCoords.length === 0) return 0;
+  const step = Math.max(1, Math.floor(routeCoords.length / 60));
+  let covered = 0;
+  let total = 0;
+  for (let i = 0; i < routeCoords.length; i += step) {
+    total++;
+    if (isPointCovered(routeCoords[i], lights, businesses)) covered++;
+  }
+  return total > 0 ? covered / total : 0;
+}
+
+// Splits a route polyline into contiguous covered/uncovered runs so the map can render
+// which stretches are actually lit or near active businesses versus dark shortcuts.
+function buildCoverageSegments(routeCoords, lights, businesses) {
+  if (!routeCoords || routeCoords.length < 2) return [];
+  const flags = routeCoords.map((pt) => isPointCovered(pt, lights, businesses));
+  const segments = [];
+  let start = 0;
+  for (let i = 1; i < routeCoords.length; i++) {
+    if (flags[i] !== flags[start]) {
+      segments.push({ coords: routeCoords.slice(start, i + 1), covered: flags[start] });
+      start = i;
+    }
+  }
+  segments.push({ coords: routeCoords.slice(start), covered: flags[start] });
+  return segments;
+}
+
 function formatDistance(meters) {
   if (!Number.isFinite(meters)) return "--";
   if (meters < 1000) return `${Math.round(meters)} m`;
@@ -134,6 +176,30 @@ function getManeuverVisual(step) {
   return { Icon: ArrowUp, angle: MODIFIER_ANGLES[modifier] ?? 0 };
 }
 
+// Converts a raw OSRM route object into the shape the app renders/scores
+function toRouteResult(route) {
+  const pathCoords = route.geometry.coordinates.map((c) => [c[1], c[0]]);
+
+  // Parse steps for the directions HUD and live turn-by-turn banner
+  const steps = route.legs && route.legs[0]?.steps
+    ? route.legs[0].steps.map((s) => ({
+        text: formatInstruction(s),
+        distance: s.distance,
+        duration: s.duration,
+        type: s.maneuver?.type,
+        modifier: s.maneuver?.modifier,
+        location: s.maneuver?.location ? [s.maneuver.location[1], s.maneuver.location[0]] : null,
+      }))
+    : [];
+
+  return {
+    coords: pathCoords,
+    distanceText: `${(route.distance / 1000).toFixed(2)} km`,
+    rawMeters: route.distance,
+    steps: steps
+  };
+}
+
 // BULLETPROOF 3-TIER OSRM ENGINE WITH DIRECTIONS
 async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
   const baseUrl = "https://router.project-osrm.org/route/v1";
@@ -159,31 +225,38 @@ async function fetchOSRMRoute(startPt, endPt, alternativeMode = false) {
 
     if (data.code === "Ok" && data.routes && data.routes.length > 0) {
       const selectedRoute = alternativeMode && data.routes.length > 1 ? data.routes[1] : data.routes[0];
-      const pathCoords = selectedRoute.geometry.coordinates.map(c => [c[1], c[0]]);
-
-      // Parse steps for the directions HUD and live turn-by-turn banner
-      const steps = selectedRoute.legs && selectedRoute.legs[0]?.steps
-        ? selectedRoute.legs[0].steps.map((s) => ({
-            text: formatInstruction(s),
-            distance: s.distance,
-            duration: s.duration,
-            type: s.maneuver?.type,
-            modifier: s.maneuver?.modifier,
-            location: s.maneuver?.location ? [s.maneuver.location[1], s.maneuver.location[0]] : null,
-          }))
-        : [];
-
-      return {
-        coords: pathCoords,
-        distanceText: `${(selectedRoute.distance / 1000).toFixed(2)} km`,
-        rawMeters: selectedRoute.distance,
-        steps: steps
-      };
+      return toRouteResult(selectedRoute);
     }
   } catch (e) {
     console.error("OSRM Fetch Error: ", e);
   }
   return null;
+}
+
+// Fetches every route alternative OSRM offers (rather than picking one blindly) so the
+// caller can score each by streetlight/business coverage and choose the genuinely safer one
+async function fetchOSRMRouteOptions(startPt, endPt) {
+  const baseUrl = "https://router.project-osrm.org/route/v1";
+  const coords = `${startPt[1]},${startPt[0]};${endPt[1]},${endPt[0]}`;
+  const queryParams = `overview=full&geometries=geojson&steps=true&alternatives=true`;
+
+  try {
+    let res = await fetch(`${baseUrl}/foot/${coords}?${queryParams}`);
+    let data = await res.json();
+
+    if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
+      console.warn("Foot routing failed. Trying driving profile...");
+      res = await fetch(`${baseUrl}/driving/${coords}?${queryParams}`);
+      data = await res.json();
+    }
+
+    if (data.code === "Ok" && data.routes && data.routes.length > 0) {
+      return data.routes.map(toRouteResult);
+    }
+  } catch (e) {
+    console.error("OSRM Fetch Error: ", e);
+  }
+  return [];
 }
 
 function MapRecenter({ center, zoom }) {
@@ -324,7 +397,7 @@ export default function App() {
   const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
   const [isNightMode, setIsNightMode] = useState(false);
 
-  const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m" });
+  const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m", coveragePct: 0 });
 
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
@@ -452,14 +525,15 @@ export default function App() {
     const endPt = [destination.lat, destination.lng];
     const midPoint = [(startPt[0] + endPt[0]) / 2, (startPt[1] + endPt[1]) / 2];
 
-    setLights(generateStreetlights(midPoint));
-    setBusinesses(generateBusinesses(midPoint));
+    const midLights = generateStreetlights(midPoint);
+    const midBusinesses = generateBusinesses(midPoint);
+    setLights(midLights);
+    setBusinesses(midBusinesses);
     setRefugeHubs(generateRefugeHubs(midPoint));
 
-    const standardData = await fetchOSRMRoute(startPt, endPt, false);
-    const secureData = await fetchOSRMRoute(startPt, endPt, true);
+    const routeOptions = await fetchOSRMRouteOptions(startPt, endPt);
 
-    if (!standardData) {
+    if (routeOptions.length === 0) {
       showNotification("🚨 Routing Error: The server could not find a physical road connecting these points. Try locations closer together.", "danger");
       setSafestRoute(null);
       setDangerRoute(null);
@@ -467,50 +541,62 @@ export default function App() {
       return;
     }
 
-    setDangerRoute(standardData.coords);
+    // Score every alternative by how much of it runs near lit streetlights / open
+    // businesses, then pick the best-covered one as the "safest" route — not a guess.
+    const scored = routeOptions
+      .map((r) => ({ ...r, coverage: scoreRouteCoverage(r.coords, midLights, midBusinesses) }))
+      .sort((a, b) => b.coverage - a.coverage || a.rawMeters - b.rawMeters);
 
-    // Assign route & extract directions
-    if (secureData) {
-      setSafestRoute(secureData.coords);
-      setDirections(secureData.steps);
-    } else {
-      setSafestRoute(standardData.coords);
-      setDirections(standardData.steps);
-    }
+    const safest = scored[0];
+    const riskiest = scored.length > 1 ? scored[scored.length - 1] : null;
 
-    const safeMeters = secureData ? secureData.rawMeters : standardData.rawMeters;
-    const diffMeters = Math.max(0, Math.round(safeMeters - standardData.rawMeters));
+    setSafestRoute(safest.coords);
+    setDirections(safest.steps);
+    setDangerRoute(riskiest ? riskiest.coords : null);
+
+    const diffMeters = riskiest ? Math.max(0, Math.round(safest.rawMeters - riskiest.rawMeters)) : 0;
+    const coveragePct = Math.round(safest.coverage * 100);
 
     setRouteMetrics({
-      standardDist: standardData.distanceText,
-      shadowDist: secureData ? secureData.distanceText : standardData.distanceText,
-      distanceTradeoff: `+${diffMeters} meters`
+      standardDist: riskiest ? riskiest.distanceText : safest.distanceText,
+      shadowDist: safest.distanceText,
+      distanceTradeoff: `+${diffMeters} meters`,
+      coveragePct
     });
-    setSafetyScore(isNightMode ? 86 : 97);
+
+    // Night hours weight lit/business coverage more heavily since natural visibility is gone
+    const baseline = isNightMode ? 55 : 75;
+    const bonus = isNightMode ? 40 : 20;
+    setSafetyScore(Math.round(baseline + safest.coverage * bonus));
   }, [startLocation, destination, isNightMode]);
 
   useEffect(() => { if (destination) calculateSafetyRoutes(); }, [destination, calculateSafetyRoutes]);
 
-  // Re-plans the route from a live GPS fix when the walker has drifted off the path
+  // Re-plans the route from a live GPS fix when the walker has drifted off the path,
+  // re-scoring alternatives against the same streetlight/business coverage data.
   const rerouteFromLivePosition = useCallback(async (fromPoint) => {
     if (!destination) return;
     setIsRerouting(true);
     showNotification("📡 Off route detected — recalculating path...", "warning");
     const endPt = [destination.lat, destination.lng];
-    const standardData = await fetchOSRMRoute(fromPoint, endPt, false);
-    const secureData = await fetchOSRMRoute(fromPoint, endPt, true);
-    const chosen = secureData || standardData;
+    const routeOptions = await fetchOSRMRouteOptions(fromPoint, endPt);
 
-    if (chosen) {
-      setDangerRoute(standardData ? standardData.coords : null);
-      setSafestRoute(chosen.coords);
-      setDirections(chosen.steps);
+    if (routeOptions.length > 0) {
+      const scored = routeOptions
+        .map((r) => ({ ...r, coverage: scoreRouteCoverage(r.coords, lights, businesses) }))
+        .sort((a, b) => b.coverage - a.coverage || a.rawMeters - b.rawMeters);
+      const safest = scored[0];
+      const riskiest = scored.length > 1 ? scored[scored.length - 1] : null;
+
+      setDangerRoute(riskiest ? riskiest.coords : null);
+      setSafestRoute(safest.coords);
+      setDirections(safest.steps);
       setCurrentStepIndex(0);
       lastAnnouncedIndexRef.current = -1;
       showNotification("✅ Route recalculated.", "success");
     }
     setIsRerouting(false);
-  }, [destination]);
+  }, [destination, lights, businesses]);
 
   // Derived live stats: distance to next turn, remaining distance/time — recomputed
   // from the latest GPS fix rather than stored, so no state sync is needed on every tick.
@@ -582,6 +668,13 @@ export default function App() {
     if (!safestRoute || !isNavigating || !livePosition) return null;
     return nearestPointOnRoute(safestRoute, livePosition);
   }, [safestRoute, isNavigating, livePosition]);
+
+  // Coverage-colored segments for the route-preview map (before navigation starts) —
+  // this is what actually shows *why* a path was picked as the safest one.
+  const safestRouteSegments = useMemo(() => {
+    if (isNavigating || !safestRoute) return [];
+    return buildCoverageSegments(safestRoute, lights, businesses);
+  }, [isNavigating, safestRoute, lights, businesses]);
 
   const handleSOSPanicDispatch = () => {
     const referenceLocation = livePosition || userLocation;
@@ -686,7 +779,19 @@ export default function App() {
             </Marker>
           )}
 
-          {!isNavigating && safestRoute && <Polyline positions={safestRoute} pathOptions={{ color: "#10b981", weight: 6, opacity: 0.95, lineCap: "round" }} />}
+          {!isNavigating && safestRouteSegments.map((seg, i) => (
+            <Polyline
+              key={i}
+              positions={seg.coords}
+              pathOptions={{
+                color: seg.covered ? "#10b981" : "#f59e0b",
+                weight: 6,
+                opacity: 0.95,
+                lineCap: "round",
+                dashArray: seg.covered ? null : "2,10",
+              }}
+            />
+          ))}
           {isNavigating && safestRoute && (
             <>
               {routeProgress && routeProgress.index > 0 && (
@@ -700,11 +805,30 @@ export default function App() {
           {lights.map((l) => (
             <div key={l.id}>
               <Marker position={[l.lat, l.lng]} icon={l.status === "online" ? streetlightIcon : brokenLightIcon} />
-              {l.status === "online" && isNightMode && <Circle center={[l.lat, l.lng]} radius={150} pathOptions={{ color: "#f59e0b", fillColor: "#f59e0b", fillOpacity: 0.05, weight: 1 }} />}
+              {l.status === "online" && (
+                <Circle
+                  center={[l.lat, l.lng]}
+                  radius={LIGHT_COVERAGE_RADIUS_M}
+                  pathOptions={{ color: "#f59e0b", fillColor: "#f59e0b", fillOpacity: isNightMode ? 0.09 : 0.04, weight: 1 }}
+                />
+              )}
             </div>
           ))}
 
-          {businesses.map((b) => <Marker key={b.id} position={[b.lat, b.lng]} icon={shopIcon} />)}
+          {businesses.map((b) => (
+            <div key={b.id}>
+              <Marker position={[b.lat, b.lng]} icon={b.open ? shopIcon : closedShopIcon}>
+                <Popup><div className="text-black font-bold text-xs p-1">{b.name} — {b.open ? "Open now" : "Closed"}</div></Popup>
+              </Marker>
+              {b.open && (
+                <Circle
+                  center={[b.lat, b.lng]}
+                  radius={BUSINESS_COVERAGE_RADIUS_M}
+                  pathOptions={{ color: "#10b981", fillColor: "#10b981", fillOpacity: 0.06, weight: 1, dashArray: "4,4" }}
+                />
+              )}
+            </div>
+          ))}
           {hazardPins.map((h) => <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon} />)}
           {refugeHubs.map((hub) => <Marker key={hub.id} position={[hub.lat, hub.lng]} icon={emergencyRefugeIcon}><Popup><div className="text-black font-bold text-xs p-1">{hub.name} ({hub.type})</div></Popup></Marker>)}
 
@@ -812,7 +936,8 @@ export default function App() {
             <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, marginBottom: 6 }}>ENGINE ROUTING COMPARISON</div>
             <div style={styles.metricRow}><span style={{ color: "#cbd5e1" }}>🔴 Standard Route</span><span style={{ color: "#f87171" }}>{routeMetrics.standardDist}</span></div>
             <div style={styles.metricRow}><span style={{ color: "#cbd5e1" }}>🟢 ShadowPath</span><span style={{ color: "#34d399" }}>{routeMetrics.shadowDist}</span></div>
-            <div style={{ background: "rgba(99,102,241,0.06)", padding: "6px", borderRadius: 6, fontSize: 10, color: "#a5b4fc" }}>💡 Tradeoff: Swapped {routeMetrics.distanceTradeoff} for optimized safety corridors.</div>
+            <div style={{ ...styles.metricRow, paddingBottom: 0 }}><span style={{ color: "#cbd5e1" }}>💡 Lit / Business Coverage</span><span style={{ color: "#34d399" }}>{routeMetrics.coveragePct}%</span></div>
+            <div style={{ background: "rgba(99,102,241,0.06)", padding: "6px", borderRadius: 6, fontSize: 10, color: "#a5b4fc", marginTop: 6 }}>💡 Tradeoff: Swapped {routeMetrics.distanceTradeoff} for {routeMetrics.coveragePct}% streetlight/business coverage.</div>
           </div>
         )}
 
@@ -837,8 +962,10 @@ export default function App() {
 
         <div style={styles.legendBox}>
           <div style={styles.legendTitle}>MAP LEGEND</div>
-          <div style={styles.legendItem}>🟢 Safest Route Vector (Lit)</div>
-          <div style={styles.legendItem}>🔴 Unlit High Risk Shortcut</div>
+          <div style={styles.legendItem}>🟢 Covered by streetlight/business zone</div>
+          <div style={styles.legendItem}>🟡 Dotted = dark, uncovered stretch</div>
+          <div style={styles.legendItem}>🔴 Riskier alternate route</div>
+          <div style={styles.legendItem}>💡 / 🏪 Amber & green rings = coverage radius</div>
           <div style={styles.legendItem}>🔵 <strong>Live GPS Tracker</strong></div>
         </div>
       </div>

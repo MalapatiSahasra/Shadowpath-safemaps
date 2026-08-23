@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { ArrowUp, Flag, MapPin, RotateCw, Volume2, VolumeX, LocateFixed, Mic, MicOff, EllipsisVertical, ArrowLeftRight } from "lucide-react";
+import { ArrowUp, Flag, MapPin, RotateCw, Volume2, VolumeX, LocateFixed, Mic, MicOff } from "lucide-react";
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -30,15 +30,6 @@ const createHeadingIcon = (angle = 0) =>
     </div>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17],
-  });
-
-// Floating "12 min" style pill badge placed at a route's midpoint, auto-centered on its point
-const createDurationBadgeIcon = (text, primary) =>
-  L.divIcon({
-    className: "",
-    html: `<div style="transform:translate(-50%,-50%);background:${primary ? "#10b981" : "rgba(30,41,59,0.95)"};color:${primary ? "#04150f" : "#cbd5e1"};font-size:11px;font-weight:800;padding:5px 11px;border-radius:14px;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.45);border:1px solid ${primary ? "rgba(4,21,15,0.15)" : "rgba(148,163,184,0.35)"}">${text}</div>`,
-    iconSize: [0, 0],
-    iconAnchor: [0, 0],
   });
 
 const streetlightIcon = L.divIcon({ className: "", html: `<div style="font-size:18px;filter:drop-shadow(0 0 4px #f59e0b)">💡</div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
@@ -205,7 +196,6 @@ function toRouteResult(route) {
     coords: pathCoords,
     distanceText: `${(route.distance / 1000).toFixed(2)} km`,
     rawMeters: route.distance,
-    rawSeconds: route.duration,
     steps: steps
   };
 }
@@ -375,14 +365,14 @@ function LocationSelector({ label, value, onChange, userLocation, gpsDetecting }
 
   return (
     <div ref={ref} style={{ position: "relative", zIndex: label === "DESTINATION" ? 10000 : 5000 }}>
-      <div style={styles.inputRow}>
+      <div style={{ ...styles.inputRow, ...(label === "START POINT" && gpsDetecting ? { border: "1px solid rgba(34,211,238,0.5)" } : {}) }}>
         {label === "START POINT" ? (
           gpsDetecting ? ( <span className="gps-detecting" style={{ width: 10, height: 10, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} /> ) : ( <span style={{ color: "#60a5fa", fontSize: 14 }}>➤</span> )
         ) : ( <span style={{ color: "#a78bfa", fontSize: 14 }}>🔍</span> )}
         <input
           style={styles.locationInput}
           value={query}
-          placeholder={label === "START POINT" ? "Detecting location..." : listening ? "Listening..." : "Search or speak destination..."}
+          placeholder={label === "START POINT" ? "Detecting location..." : listening ? "Listening..." : "Search destination..."}
           onChange={handleChange}
           onFocus={() => setOpen(true)}
         />
@@ -426,7 +416,6 @@ export default function App() {
 
   const [directions, setDirections] = useState([]);
   const [showDirections, setShowDirections] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const [hazardPins, setHazardPins] = useState([]);
   const [sosActive, setSosActive] = useState(false);
@@ -437,13 +426,14 @@ export default function App() {
   const [safetyScore, setSafetyScore] = useState(null);
   const [logMode, setLogMode] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [locationStatus, setLocationStatus] = useState("Initializing Navigation Workspace...");
   const [gpsDetecting, setGpsDetecting] = useState(true);
 
   const [temporalHour, setTemporalHour] = useState(new Date().getHours());
   const [temporalMinute, setTemporalMinute] = useState(new Date().getMinutes());
   const [isNightMode, setIsNightMode] = useState(false);
 
-  const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m", coveragePct: 0, safestDuration: "", riskiestDuration: "" });
+  const [routeMetrics, setRouteMetrics] = useState({ standardDist: "0.0 km", shadowDist: "0.0 km", distanceTradeoff: "0m", coveragePct: 0 });
 
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
@@ -460,19 +450,6 @@ export default function App() {
   const lastRerouteAtRef = useRef(0);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
-
-  const setupWorkspace = (center) => {
-    setUserLocation(center);
-    setMapCenter(center);
-    setLights(generateStreetlights(center));
-    setBusinesses(generateBusinesses(center));
-    setRefugeHubs(generateRefugeHubs(center));
-  };
-
-  const showNotification = (msg, type = "info") => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
 
   useEffect(() => {
     const tick = () => {
@@ -510,7 +487,6 @@ export default function App() {
     } else {
       if (!navigator.geolocation) {
         setupWorkspace(FALLBACK_CENTER);
-        setGpsDetecting(false);
         return;
       }
       navigator.geolocation.getCurrentPosition(
@@ -519,12 +495,13 @@ export default function App() {
           setupWorkspace(center);
           const name = await reverseGeocode(center[0], center[1]);
           setStartLocation({ name, lat: center[0], lng: center[1] });
+          setLocationStatus(`📍 ${name}`);
           setGpsDetecting(false);
         },
         () => {
           setupWorkspace(FALLBACK_CENTER);
           setStartLocation({ name: "Fallback Hub", lat: FALLBACK_CENTER[0], lng: FALLBACK_CENTER[1] });
-          showNotification("⚠️ GPS offline. Using a fallback location.", "warning");
+          setLocationStatus("⚠️ GPS Offline. Fallback Center Loaded.");
           setGpsDetecting(false);
         },
         { enableHighAccuracy: true }
@@ -558,6 +535,19 @@ export default function App() {
     }
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
   }, [isNavigating]);
+
+  const setupWorkspace = (center) => {
+    setUserLocation(center);
+    setMapCenter(center);
+    setLights(generateStreetlights(center));
+    setBusinesses(generateBusinesses(center));
+    setRefugeHubs(generateRefugeHubs(center));
+  };
+
+  const showNotification = (msg, type = "info") => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 5000);
+  };
 
   const speak = useCallback((text) => {
     if (!voiceEnabled || typeof window === "undefined" || !window.speechSynthesis) return;
@@ -607,9 +597,7 @@ export default function App() {
       standardDist: riskiest ? riskiest.distanceText : safest.distanceText,
       shadowDist: safest.distanceText,
       distanceTradeoff: `+${diffMeters} meters`,
-      coveragePct,
-      safestDuration: formatDuration(safest.rawSeconds),
-      riskiestDuration: riskiest ? formatDuration(riskiest.rawSeconds) : "",
+      coveragePct
     });
 
     // Night hours weight lit/business coverage more heavily since natural visibility is gone
@@ -724,10 +712,6 @@ export default function App() {
     return buildCoverageSegments(safestRoute, lights, businesses);
   }, [isNavigating, safestRoute, lights, businesses]);
 
-  // Midpoints for the floating "12 min" duration badges shown on each route in preview mode
-  const safestMidpoint = useMemo(() => (safestRoute && safestRoute.length > 0 ? safestRoute[Math.floor(safestRoute.length / 2)] : null), [safestRoute]);
-  const dangerMidpoint = useMemo(() => (dangerRoute && dangerRoute.length > 0 ? dangerRoute[Math.floor(dangerRoute.length / 2)] : null), [dangerRoute]);
-
   const handleSOSPanicDispatch = () => {
     const referenceLocation = livePosition || userLocation;
     if (!referenceLocation || refugeHubs.length === 0) return;
@@ -774,15 +758,6 @@ export default function App() {
     showNotification("Routing link copied!", "success");
   };
 
-  const handleSwapLocations = () => {
-    if (!startLocation || !destination) {
-      showNotification("Set both a start and destination to swap them.", "warning");
-      return;
-    }
-    setStartLocation(destination);
-    setDestination(startLocation);
-  };
-
   const toggleNavigation = () => {
     if (!startLocation || !destination) {
       showNotification("Please set a destination to begin live tracking.", "warning");
@@ -792,8 +767,7 @@ export default function App() {
     setIsNavigating(startingNav);
 
     if (startingNav) {
-      setShowDirections(false);
-      setMenuOpen(false);
+      setShowDirections(true);
       setCurrentStepIndex(0);
       setFollowMode(true);
       lastAnnouncedIndexRef.current = -1;
@@ -863,13 +837,6 @@ export default function App() {
             </>
           )}
           {dangerRoute && !isNavigating && <Polyline positions={dangerRoute} pathOptions={{ color: "#ef4444", weight: 3.5, opacity: 0.8, dashArray: "6,8" }} />}
-
-          {!isNavigating && safestMidpoint && routeMetrics.safestDuration && (
-            <Marker position={safestMidpoint} icon={createDurationBadgeIcon(routeMetrics.safestDuration, true)} interactive={false} />
-          )}
-          {!isNavigating && dangerMidpoint && routeMetrics.riskiestDuration && (
-            <Marker position={dangerMidpoint} icon={createDurationBadgeIcon(routeMetrics.riskiestDuration, false)} interactive={false} />
-          )}
 
           {lights.map((l) => (
             <div key={l.id}>
@@ -944,100 +911,100 @@ export default function App() {
         )}
       </div>
 
-      {/* TOP SEARCH CARD — Google Maps style start/destination fields with swap + settings menu */}
-      {!isNavigating && (
-        <div style={styles.searchCard}>
-          <div style={styles.searchCardHeader}>
-            <div style={styles.searchCardHeaderLogo}>🛡️</div>
-            <div style={styles.searchCardHeaderText}>ShadowPath</div>
-            <div style={{ position: "relative" }}>
-              <button style={styles.kebabBtn} onClick={() => setMenuOpen((v) => !v)} title="More options">
-                <EllipsisVertical size={18} />
-              </button>
-              {menuOpen && (
-                <div style={styles.settingsPanel}>
-                  <div style={styles.temporalHeader}><span style={styles.temporalLabel}>⏱ TEMPORAL SYNC</span><span style={{ color: "#60a5fa", fontWeight: 700, fontSize: 14 }}>{timeString}</span></div>
-                  <input type="range" min={0} max={23} value={temporalHour} onChange={(e) => { setTemporalHour(Number(e.target.value)); setTemporalMinute(new Date().getMinutes()); }} style={styles.slider} />
-                  {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
-
-                  <button style={styles.menuActionBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click map frame to drop hazard pin.", "warning"); setMenuOpen(false); }}>
-                    ⚠️ {logMode ? "Click location on map..." : "+ Log Hazard Area"}
-                  </button>
-
-                  <div style={styles.legendBox}>
-                    <div style={styles.legendTitle}>MAP LEGEND</div>
-                    <div style={styles.legendItem}>🟢 Covered by streetlight/business zone</div>
-                    <div style={styles.legendItem}>🟡 Dotted = dark, uncovered stretch</div>
-                    <div style={styles.legendItem}>🔴 Riskier alternate route</div>
-                    <div style={styles.legendItem}>💡 / 🏪 Amber & green rings = coverage radius</div>
-                    <div style={styles.legendItem}>🔵 <strong>Live GPS Tracker</strong></div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "stretch" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <LocationSelector label="START POINT" value={startLocation?.name || ""} onChange={setStartLocation} userLocation={userLocation || FALLBACK_CENTER} gpsDetecting={gpsDetecting} />
-              <div style={styles.searchDivider} />
-              <LocationSelector label="DESTINATION" value={destination?.name || ""} onChange={setDestination} userLocation={userLocation || FALLBACK_CENTER} />
-            </div>
-            <button style={styles.swapBtn} onClick={handleSwapLocations} title="Swap start and destination">
-              <ArrowLeftRight size={16} />
-            </button>
-          </div>
+      <div className="hud-scrollbar" style={styles.hud}>
+        <div style={styles.header}>
+          <div style={styles.logoBox}><span style={{ fontSize: 22 }}>🛡️</span></div>
+          <div><div style={styles.appName}>ShadowPath</div><div style={styles.appSub}>Context-Aware Navigation Engine</div></div>
         </div>
-      )}
 
-      {/* Persistent SOS button — always reachable, even before a route is chosen */}
-      <button style={{ ...styles.sosFab, ...(sosActive ? styles.sosFabActive : {}) }} onClick={handleSOSPanicDispatch} title="Activate SOS refuge routing">
-        🚨
-      </button>
+        <div style={styles.locationStatusBox}>
+          <span style={{ fontSize: 10 }}>📡</span><span style={{ fontSize: 10, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden" }}>{locationStatus}</span>
+        </div>
 
-      {/* BOTTOM ROUTE-PREVIEW SHEET — duration, distance, safety score, Start/Share */}
-      {!isNavigating && safestRoute && (
-        <div style={styles.bottomSheet}>
-          <div style={styles.sheetHandle} />
-          <div style={styles.sheetSummaryRow}>
-            <div>
-              <div style={styles.sheetDuration}>{routeMetrics.safestDuration || "--"}</div>
-              <div style={styles.sheetSubtitle}>Safest route · {routeMetrics.shadowDist}</div>
-            </div>
-            {safetyScore !== null && (
-              <span style={{ ...styles.scoreBadge, background: safetyScore >= 75 ? "#10b981" : "#f59e0b" }}>{safetyScore}% Safe</span>
+        {safetyScore !== null && safestRoute && (
+          <div style={styles.scoreBar}>
+            <span style={styles.scoreLabel}>SAFETY SCORE</span>
+            <span style={{ ...styles.scoreBadge, background: safetyScore >= 75 ? "#10b981" : "#f59e0b" }}>{safetyScore}% Safe</span>
+          </div>
+        )}
+
+        <button
+          style={{ ...styles.navBtn, background: isNavigating ? "#ef4444" : "#10b981", boxShadow: isNavigating ? "0 0 15px rgba(239,68,68,0.5)" : "0 0 15px rgba(16,185,129,0.3)" }}
+          onClick={toggleNavigation}
+        >
+          {isNavigating ? "🛑 END NAVIGATION" : "🚀 START LIVE TRACKING"}
+        </button>
+
+        {/* TURN-BY-TURN DIRECTIONS PANEL */}
+        {safestRoute && directions.length > 0 && (
+          <div style={styles.directionsBox}>
+            <button
+              style={styles.directionsToggle}
+              onClick={() => setShowDirections(!showDirections)}
+            >
+              {showDirections ? "🔽 Hide Directions" : "▶️ Show Turn-by-Turn"}
+            </button>
+
+            {showDirections && (
+              <div className="hud-scrollbar" style={styles.directionsList}>
+                {directions.map((dir, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      ...styles.directionItem,
+                      ...(isNavigating && idx === currentStepIndex ? styles.directionItemActive : {}),
+                      ...(isNavigating && idx < currentStepIndex ? styles.directionItemDone : {}),
+                    }}
+                  >
+                    <span style={{color: '#10b981', marginRight: '6px', fontSize: '14px'}}>
+                      {idx === 0 ? '🏁' : idx === directions.length - 1 ? '📍' : '↱'}
+                    </span>
+                    {dir.text}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-          <div style={styles.sheetCoverageLine}>
-            💡 {routeMetrics.coveragePct}% covered by streetlight/business zones
-            {routeMetrics.riskiestDuration ? ` · alternate route is ${routeMetrics.riskiestDuration} (${routeMetrics.distanceTradeoff} shorter, less covered)` : ""}
-          </div>
+        )}
 
-          {directions.length > 0 && (
-            <div style={styles.directionsBox}>
-              <button style={styles.directionsToggle} onClick={() => setShowDirections(!showDirections)}>
-                {showDirections ? "🔽 Hide Directions" : "▶️ Show Turn-by-Turn"}
-              </button>
-              {showDirections && (
-                <div className="hud-scrollbar" style={styles.directionsList}>
-                  {directions.map((dir, idx) => (
-                    <div key={idx} style={styles.directionItem}>
-                      <span style={{ color: '#10b981', marginRight: '6px', fontSize: '14px' }}>
-                        {idx === 0 ? '🏁' : idx === directions.length - 1 ? '📍' : '↱'}
-                      </span>
-                      {dir.text}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div style={styles.sheetActions}>
-            <button style={styles.sheetStartBtn} onClick={toggleNavigation}>🚀 Start</button>
-            <button style={styles.sheetIconBtn} onClick={handleShare}>🔗 Share</button>
+        {safetyScore !== null && safestRoute && (
+          <div style={styles.comparisonBox}>
+            <div style={{ color: "#94a3b8", fontSize: 9, fontWeight: 700, marginBottom: 6 }}>ENGINE ROUTING COMPARISON</div>
+            <div style={styles.metricRow}><span style={{ color: "#cbd5e1" }}>🔴 Standard Route</span><span style={{ color: "#f87171" }}>{routeMetrics.standardDist}</span></div>
+            <div style={styles.metricRow}><span style={{ color: "#cbd5e1" }}>🟢 ShadowPath</span><span style={{ color: "#34d399" }}>{routeMetrics.shadowDist}</span></div>
+            <div style={{ ...styles.metricRow, paddingBottom: 0 }}><span style={{ color: "#cbd5e1" }}>💡 Lit / Business Coverage</span><span style={{ color: "#34d399" }}>{routeMetrics.coveragePct}%</span></div>
+            <div style={{ background: "rgba(99,102,241,0.06)", padding: "6px", borderRadius: 6, fontSize: 10, color: "#a5b4fc", marginTop: 6 }}>💡 Tradeoff: Swapped {routeMetrics.distanceTradeoff} for {routeMetrics.coveragePct}% streetlight/business coverage.</div>
           </div>
+        )}
+
+        <div style={styles.temporalBox}>
+          <div style={styles.temporalHeader}><span style={styles.temporalLabel}>⏱ TEMPORAL SYNC</span><span style={{ color: "#60a5fa", fontWeight: 700, fontSize: 14 }}>{timeString}</span></div>
+          <input type="range" min={0} max={23} value={temporalHour} onChange={(e) => { setTemporalHour(Number(e.target.value)); setTemporalMinute(new Date().getMinutes()); }} style={styles.slider} />
+          {isNightMode && <div style={styles.nightBadge}>🌙 Night Mode Filters Activated</div>}
         </div>
-      )}
+
+        <button style={{ ...styles.sosBtn, ...(sosActive ? styles.sosBtnActive : {}) }} onClick={handleSOSPanicDispatch}>
+          🚨 {sosActive ? "SOS ESCAPE ROUTE ACTIVE..." : "🛡️ ACTIVATE SOS REFUGE"}
+        </button>
+
+        <button style={styles.logBtn} onClick={() => { setLogMode(!logMode); showNotification("Right-click map frame to drop hazard pin.", "warning"); }}>
+          ⚠️ {logMode ? "Click location on map..." : "+ Log Hazard Area"}
+        </button>
+
+        <div style={styles.routeSection}>
+          <LocationSelector label="START POINT" value={startLocation?.name || ""} onChange={setStartLocation} userLocation={userLocation || FALLBACK_CENTER} gpsDetecting={gpsDetecting} />
+          <div style={{ marginTop: 10 }}><LocationSelector label="DESTINATION" value={destination?.name || ""} onChange={setDestination} userLocation={userLocation || FALLBACK_CENTER} /></div>
+        </div>
+
+        <div style={styles.legendBox}>
+          <div style={styles.legendTitle}>MAP LEGEND</div>
+          <div style={styles.legendItem}>🟢 Covered by streetlight/business zone</div>
+          <div style={styles.legendItem}>🟡 Dotted = dark, uncovered stretch</div>
+          <div style={styles.legendItem}>🔴 Riskier alternate route</div>
+          <div style={styles.legendItem}>💡 / 🏪 Amber & green rings = coverage radius</div>
+          <div style={styles.legendItem}>🔵 <strong>Live GPS Tracker</strong></div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1047,61 +1014,55 @@ const styles = {
   app: { position: "relative", width: "100vw", height: "100vh", background: "#0a0e1a", fontFamily: "sans-serif", overflow: "hidden" },
   mapContainer: { position: "absolute", inset: 0, zIndex: 0 },
   nightOverlay: { position: "absolute", inset: 0, background: "rgba(10,14,40,0.35)", zIndex: 1, pointerEvents: "none" },
-
-  searchCard: { position: "absolute", top: 12, left: 12, right: 12, zIndex: 11, background: "rgba(10,14,30,0.96)", backdropFilter: "blur(16px)", borderRadius: 16, border: "1px solid rgba(99,102,241,0.25)", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" },
-  searchCardHeader: { display: "flex", alignItems: "center", gap: 8, padding: "10px 8px 6px 14px" },
-  searchCardHeaderLogo: { width: 26, height: 26, borderRadius: 7, background: "linear-gradient(135deg,#1e3a5f,#312e81)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 },
-  searchCardHeaderText: { flex: 1, color: "#e0e7ff", fontSize: 13, fontWeight: 700 },
-  kebabBtn: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", padding: 6, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8 },
-  settingsPanel: { position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, zIndex: 20, background: "rgba(10,14,30,0.98)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)" },
-  searchDivider: { height: 1, background: "rgba(99,102,241,0.15)", margin: "0 14px" },
-  swapBtn: { width: 34, height: 34, borderRadius: "50%", background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", color: "#a5b4fc", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, alignSelf: "center", marginRight: 12 },
-
-  inputRow: { display: "flex", alignItems: "center", gap: 6, padding: "10px 14px" },
-  locationInput: { flex: 1, background: "transparent", border: "none", color: "#e0e7ff", fontSize: 12, outline: "none", minWidth: 0 },
+  hud: { position: "absolute", top: 12, left: 12, bottom: 12, width: 340, zIndex: 10, background: "rgba(10,14,30,0.94)", backdropFilter: "blur(16px)", borderRadius: 16, border: "1px solid rgba(99,102,241,0.25)", padding: "14px", display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", overflowX: "hidden", boxShadow: "0 0 30px rgba(0,0,0,0.5)" },
+  header: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 6, borderBottom: "1px solid rgba(99,102,241,0.2)" },
+  logoBox: { width: 38, height: 38, borderRadius: 8, background: "linear-gradient(135deg,#1e3a5f,#312e81)", display: "flex", alignItems: "center", justifyContent: "center" },
+  appName: { color: "#e0e7ff", fontSize: 19, fontWeight: 700 },
+  appSub: { color: "#6b7280", fontSize: 10 },
+  locationStatusBox: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.5)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8, padding: "5px 10px" },
+  scoreBar: { display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "6px 12px" },
+  scoreLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
+  scoreBadge: { padding: "3px 10px", borderRadius: 20, color: "#fff", fontSize: 11, fontWeight: 700 },
+  navBtn: { border: "none", borderRadius: 10, color: "#fff", padding: "12px", cursor: "pointer", fontSize: 12, fontWeight: 800, textTransform: "uppercase" },
+  directionsBox: { background: "rgba(15,23,42,0.9)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" },
+  directionsToggle: { background: "rgba(16,185,129,0.1)", border: "none", color: "#34d399", padding: "10px", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" },
+  directionsList: { maxHeight: "200px", overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 },
+  directionItem: { color: "#e0e7ff", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 6 },
+  directionItemActive: { background: "rgba(16,185,129,0.12)", borderLeft: "3px solid #10b981", paddingLeft: 6, borderRadius: 4, fontWeight: 700, color: "#fff" },
+  directionItemDone: { opacity: 0.35 },
+  comparisonBox: { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, padding: "10px", marginTop: "2px" },
+  metricRow: { display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: "bold", paddingBottom: 6 },
+  shareBtn: { background: "rgba(30,58,138,0.5)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600 },
+  shareLink: { background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 6, padding: "6px", color: "#a5b4fc", fontSize: 9, wordBreak: "break-all" },
+  temporalBox: { background: "rgba(15,23,42,0.8)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 10, padding: "10px" },
+  temporalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  temporalLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
+  slider: { width: "100%", accentColor: "#6366f1", cursor: "pointer" },
+  nightBadge: { marginTop: 6, background: "rgba(109,40,217,0.15)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 6, padding: "4px", color: "#c084fc", fontSize: 10, textAlign: "center" },
+  sosBtn: { background: "linear-gradient(135deg,#dc2626,#f97316)", border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 12, fontWeight: 800 },
+  sosBtnActive: { background: "linear-gradient(135deg,#7f1d1d,#dc2626)", boxShadow: "0 0 20px rgba(239,68,68,0.6)" },
+  logBtn: { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, color: "#d1d5db", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600 },
+  routeSection: { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 10, padding: "10px" },
+  inputRow: { display: "flex", alignItems: "center", gap: 6, background: "rgba(30,41,59,0.7)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, padding: "6px" },
+  locationInput: { flex: 1, background: "transparent", border: "none", color: "#e0e7ff", fontSize: 12, outline: "none" },
   micBtn: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, borderRadius: 6, flexShrink: 0 },
   micBtnActive: { color: "#ef4444" },
   dropdown: { position: "absolute", top: "100%", left: 0, right: 0, background: "rgba(15,23,42,0.98)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, zIndex: 99999, maxHeight: 180, overflowY: "auto", marginTop: "4px" },
   dropdownItem: { padding: "6px 10px", color: "#cbd5e1", fontSize: 12, cursor: "pointer" },
-
-  sosFab: { position: "absolute", top: 190, right: 16, zIndex: 9, width: 48, height: 48, borderRadius: "50%", background: "linear-gradient(135deg,#dc2626,#f97316)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(220,38,38,0.5)" },
-  sosFabActive: { boxShadow: "0 0 0 6px rgba(239,68,68,0.25), 0 4px 16px rgba(220,38,38,0.6)" },
-
-  bottomSheet: { position: "absolute", left: 12, right: 12, bottom: 12, zIndex: 11, background: "rgba(10,14,30,0.97)", backdropFilter: "blur(16px)", borderRadius: 18, border: "1px solid rgba(99,102,241,0.25)", boxShadow: "0 -8px 30px rgba(0,0,0,0.5)", padding: "8px 16px 16px", display: "flex", flexDirection: "column", gap: 10, maxHeight: "60vh", overflowY: "auto" },
-  sheetHandle: { width: 40, height: 4, borderRadius: 4, background: "rgba(148,163,184,0.35)", alignSelf: "center", marginBottom: 2 },
-  sheetSummaryRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  sheetDuration: { color: "#fff", fontSize: 26, fontWeight: 800, lineHeight: 1.1 },
-  sheetSubtitle: { color: "#9ca3af", fontSize: 12, marginTop: 2 },
-  sheetCoverageLine: { color: "#a5b4fc", fontSize: 11, background: "rgba(99,102,241,0.08)", padding: "8px 10px", borderRadius: 8 },
-  sheetActions: { display: "flex", gap: 10, marginTop: 2 },
-  sheetStartBtn: { flex: 1, background: "#10b981", border: "none", borderRadius: 12, color: "#04150f", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, boxShadow: "0 0 15px rgba(16,185,129,0.35)" },
-  sheetIconBtn: { background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 12, color: "#a5b4fc", padding: "13px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700 },
-
-  scoreBadge: { padding: "5px 12px", borderRadius: 20, color: "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 },
-
-  directionsBox: { background: "rgba(15,23,42,0.9)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" },
-  directionsToggle: { background: "rgba(16,185,129,0.1)", border: "none", color: "#34d399", padding: "10px", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" },
-  directionsList: { maxHeight: "160px", overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 },
-  directionItem: { color: "#e0e7ff", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 6 },
-
-  temporalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 },
-  temporalLabel: { color: "#9ca3af", fontSize: 9, fontWeight: 700 },
-  slider: { width: "100%", accentColor: "#6366f1", cursor: "pointer" },
-  nightBadge: { background: "rgba(109,40,217,0.15)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 6, padding: "4px", color: "#c084fc", fontSize: 10, textAlign: "center" },
-  menuActionBtn: { background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, color: "#d1d5db", padding: "8px", cursor: "pointer", fontSize: 12, fontWeight: 600, textAlign: "left" },
-
+  statsRow: { display: "flex", gap: 4 },
+  statBox: { flex: 1, background: "rgba(15,23,42,0.6)", border: "1px solid rgba(99, 102, 241, 0.12)", borderRadius: 8, padding: "6px 2px", textAlign: "center" },
+  statNum: { color: "#e0e7ff", fontSize: 16, fontWeight: 700 },
+  statLabel: { color: "#6b7280", fontSize: 8, marginTop: 1 },
   legendBox: { background: "rgba(15,23,42,0.5)", border: "1px solid rgba(99, 102, 241, 0.12)", borderRadius: 8, padding: "10px" },
   legendTitle: { color: "#9ca3af", fontSize: 9, fontWeight: 700, marginBottom: 6 },
   legendItem: { color: "#d1d5db", fontSize: 11, marginBottom: 4 },
-
   toast: { position: "fixed", top: 16, right: 16, zIndex: 9999, background: "rgba(10,14,30,0.95)", border: "1px solid", borderRadius: 8, padding: "10px", color: "#e0e7ff", fontSize: 12, fontWeight: 600, maxWidth: 280 },
-
-  navBanner: { position: "absolute", top: 12, left: 12, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
+  navBanner: { position: "absolute", top: 12, left: 366, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
   navBannerIcon: { color: "#34d399", flexShrink: 0, display: "flex" },
   navBannerText: { flex: 1, minWidth: 0 },
   navBannerDistance: { color: "#fff", fontSize: 20, fontWeight: 800, lineHeight: 1.1 },
   navBannerInstruction: { color: "#cbd5e1", fontSize: 12, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   voiceBtn: { background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#a5b4fc", padding: 8, cursor: "pointer", display: "flex", flexShrink: 0 },
-  navFooter: { position: "absolute", bottom: 12, left: 12, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, justifyContent: "center", color: "#e0e7ff", fontSize: 12, fontWeight: 600 },
+  navFooter: { position: "absolute", bottom: 12, left: 366, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", backdropFilter: "blur(16px)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, justifyContent: "center", color: "#e0e7ff", fontSize: 12, fontWeight: 600 },
   recenterBtn: { position: "absolute", top: 12, right: 12, zIndex: 8, background: "rgba(10,14,30,0.95)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 10, color: "#93c5fd", padding: "8px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, boxShadow: "0 4px 14px rgba(0,0,0,0.4)" },
 };

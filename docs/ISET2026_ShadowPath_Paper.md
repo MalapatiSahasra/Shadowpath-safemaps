@@ -101,35 +101,6 @@ The system explicitly avoids binary safety labels. Route feedback is framed comp
 
 The Shadow Path architecture comprises five primary layers, as illustrated in Fig. 1.
 
-```
-+----------------------------------------------------------------------+
-|                        CLIENT APPLICATION                            |
-|   Route Search | Map + Overlays | Route Comparison | Report Button   |
-+-------------------------------+--------------------------------------+
-                                |  Route Request
-              +-----------------v--------------------+
-              |          SAFETY SCORING API          |
-              |   Segment scoring . Route ranking    |
-              +--------+--------------------+--------+
-                       |                   |
-          +------------v---------+  +------v--------------+
-          |   ROUTING ENGINE     |  |  GEOSPATIAL DATABASE |
-          |  (OSRM / Valhalla)   |  |  (PostGIS)           |
-          +----------------------+  |  OSM ways            |
-                                    |  Streetlight points  |
-                                    |  POI / Business data |
-                                    |  Civic nodes         |
-                                    |  User reports        |
-                                    +--------+-------------+
-                                             |  Ingested by
-                                    +--------v-------------+
-                                    |    ETL PIPELINE      |
-                                    |  OSM extracts        |
-                                    |  Municipal open data |
-                                    |  Government datasets |
-                                    +----------------------+
-```
-
 **Fig.1** Shadow Path System Architecture
 
 **Client Application:** A web interface (React/Vite prototype) where users search routes, view color-coded safety overlays, toggle preferences (e.g., "avoid unlit streets"), compare route alternatives, and submit anonymized reports.

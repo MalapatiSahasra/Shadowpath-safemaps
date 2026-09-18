@@ -19,7 +19,7 @@
 
 \begin{document}
 
-\title{ShadowPath: A Smart Navigation Solution for Safe Night-Time Travel\\}
+\title{Shadow Path: A Safety-Aware Route Recommendation System for Night-Time Pedestrian Navigation Using OpenStreetMap, Streetlight Data, and Urban Activity Signals\\}
 
 \author{
 \IEEEauthorblockN{Malapati Sahasra}
@@ -51,7 +51,7 @@ Pedestrian Safety, Context-Aware Navigation, Coverage-Based Routing, Smart Citie
 
 Present-day ubiquitous mapping applications are built around efficiency of movement: routing algorithms minimize geometric distance or vehicular travel time and, from a mathematical standpoint, treat every road as equally safe \cite{osmwiki}. For a vehicle this is a reasonable simplification. For a lone pedestrian at night, it is not -- there is a material difference between a dimly lit alley and a well-lit, active main road that a shortest-path optimizer cannot see \cite{welsh2008}. Because legacy routing engines have no notion of this difference, they can direct a vulnerable pedestrian through a riskier street purely to save a small amount of distance.
 
-This paper presents ShadowPath, a context-aware pedestrian navigation system that augments the routing graph with safety-relevant telemetry before a route is ranked, rather than presenting safety information as a separate, manually-consulted layer. ShadowPath consumes two directly measurable signals: an infrastructure layer tracking streetlight functionality, and a commercial-activity layer tracking whether nearby businesses are currently open -- both of which act as informal ``eyes on the street'' \cite{chalfin2022}. Combined with a routing pipeline that scores every candidate path against this telemetry, ShadowPath produces a navigation recommendation that weighs human comfort and safety alongside geographic brevity, backed by a working, evaluated implementation rather than a conceptual design.
+This paper presents ShadowPath, a context-aware pedestrian navigation system that augments the routing graph with safety-relevant telemetry before a route is ranked, rather than presenting safety information as a separate, manually-consulted layer. ShadowPath consumes two directly measurable signals: an infrastructure layer tracking streetlight functionality, and a commercial-activity layer tracking whether nearby businesses are currently open -- both of which serve as informal indicators of natural surveillance \cite{chalfin2022}. Combined with a routing pipeline that scores every candidate path against this telemetry, ShadowPath produces a navigation recommendation that weighs human comfort and safety alongside geographic brevity, backed by a working, evaluated implementation rather than a conceptual design.
 
 \subsection{Formal Problem Statement}
 Classical pedestrian pathfinding minimizes an undifferentiated spatial distance $\text{Distance}(u,v)$ over the road graph, implicitly treating the environment as homogeneous. At night, however, effective safety conditions vary edge-to-edge because of non-functioning streetlights, closed commercial frontage, and locally reported hazards. A router with static edge weights cannot represent this variation, so pedestrians using such a router are, by construction, never offered a route that accounts for it.
@@ -158,7 +158,7 @@ Given $k$ route alternatives returned by OSRM, the system selects
 \label{eq:select}
 \end{equation}
 
-The recommended route$^\ast$ is rendered as alternating covered/uncovered polyline segments -- grouping consecutive points of equal $\text{covered}(\cdot)$ value into contiguous runs -- while the remaining alternative is rendered as a lower-emphasis comparison route.
+The recommended route $r^\ast$ is rendered as alternating covered/uncovered polyline segments -- grouping consecutive points of equal $\text{covered}(\cdot)$ value into contiguous runs -- while the remaining alternative is rendered as a lower-emphasis comparison route.
 
 A composite safety score shown to the user combines coverage with time of day:
 \begin{equation}

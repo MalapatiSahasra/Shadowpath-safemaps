@@ -1,0 +1,379 @@
+/* =========================================================================
+   COVER / LANDING PAGE (shown before the map)
+   ========================================================================= */
+.cover {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background:
+    radial-gradient(1000px 600px at 15% 10%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(800px 500px at 90% 90%, rgba(34, 211, 238, 0.12), transparent 60%),
+    #0a0e1a;
+  color: #e0e7ff;
+  font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+  animation: coverIn 0.6s ease-out both;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.cover--leaving {
+  opacity: 0;
+  transform: scale(1.03);
+  pointer-events: none;
+}
+
+.cover *,
+.cover *::before,
+.cover *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+@keyframes coverIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---------- Background decoration ---------- */
+.cover__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(99, 102, 241, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+  pointer-events: none;
+}
+
+.cover__route {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.cover__route-shadow {
+  fill: none;
+  stroke: rgba(99, 102, 241, 0.25);
+  stroke-width: 14;
+  stroke-linecap: round;
+  filter: blur(8px);
+}
+
+.cover__route-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 2200;
+  stroke-dashoffset: 2200;
+  animation: drawRoute 3s ease-out 0.3s forwards;
+}
+
+@keyframes drawRoute {
+  to { stroke-dashoffset: 0; }
+}
+
+.cover__dot {
+  fill: #22d3ee;
+  opacity: 0;
+  animation: dotPop 0.5s ease-out 1.4s forwards, dotPulse 2.4s ease-in-out 2s infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.cover__dot--delay { animation-delay: 2s, 2.6s; }
+.cover__dot--delay2 { fill: #818cf8; animation-delay: 2.7s, 3.3s; }
+
+@keyframes dotPop {
+  from { opacity: 0; transform: scale(0); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.6); }
+}
+
+/* ---------- Layout ---------- */
+.cover__content {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: 64px;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 56px 32px 24px;
+}
+
+/* ---------- Hero ---------- */
+.cover__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 36px;
+}
+
+.cover__logo {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.45);
+}
+
+.cover__brand-name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.cover__title {
+  font-size: clamp(32px, 4.4vw, 52px);
+  line-height: 1.12;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #f1f5ff;
+}
+
+.cover__accent {
+  background: linear-gradient(90deg, #22d3ee, #818cf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.cover__subtitle {
+  margin-top: 18px;
+  max-width: 520px;
+  font-size: 16px;
+  line-height: 1.65;
+  color: #a5b4fc;
+  opacity: 0.85;
+}
+
+.cover__features {
+  list-style: none;
+  margin-top: 36px;
+  display: grid;
+  gap: 16px;
+}
+
+.cover__feature {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  animation: slideUp 0.5s ease-out both;
+}
+.cover__feature:nth-child(1) { animation-delay: 0.25s; }
+.cover__feature:nth-child(2) { animation-delay: 0.4s; }
+.cover__feature:nth-child(3) { animation-delay: 0.55s; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cover__feature-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+}
+
+.cover__feature-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #e0e7ff;
+}
+
+.cover__feature-text {
+  font-size: 13.5px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ---------- Card ---------- */
+.cover__card {
+  padding: 36px 32px;
+  border-radius: 20px;
+  background: rgba(15, 20, 40, 0.72);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: slideUp 0.6s ease-out 0.15s both;
+}
+
+.cover__card-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: #f1f5ff;
+}
+
+.cover__card-sub {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.cover__form {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cover__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c7d2fe;
+  margin-bottom: 8px;
+}
+
+.cover__input-wrap {
+  position: relative;
+}
+
+.cover__input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  pointer-events: none;
+}
+
+.cover__input {
+  width: 100%;
+  padding: 13px 14px 13px 42px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #e0e7ff;
+  background: rgba(10, 14, 26, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.cover__input::placeholder { color: #475569; }
+
+.cover__input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+}
+
+.cover__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  background: linear-gradient(135deg, #6366f1, #4f46e5 50%, #0891b2);
+  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s;
+}
+
+.cover__btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: 0 14px 30px rgba(79, 70, 229, 0.5);
+}
+
+.cover__btn:active { transform: translateY(0); }
+
+.cover__btn:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 3px;
+}
+
+.cover__btn--ghost {
+  margin-top: 0;
+  color: #c7d2fe;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: none;
+}
+
+.cover__btn--ghost:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: none;
+}
+
+.cover__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  font-size: 12px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.cover__divider::before,
+.cover__divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.cover__note {
+  margin-top: 20px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+  text-align: center;
+}
+
+.cover__footer {
+  position: relative;
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 860px) {
+  .cover__content {
+    grid-template-columns: 1fr;
+    gap: 36px;
+    padding: 36px 16px 16px;
+  }
+  .cover__brand { margin-bottom: 24px; }
+  .cover__features { margin-top: 24px; }
+  .cover__card { padding: 28px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover, .cover *, .cover *::before { animation: none !important; transition: none !important; }
+  .cover__route-line { stroke-dashoffset: 0; }
+  .cover__dot { opacity: 1; }
+}
